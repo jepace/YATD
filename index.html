@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YATD — Yet Another Tower Defense</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #050705;
+    overflow: hidden;
+    font-family: "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
+  }
+  #frame {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #crt {
+    position: relative;
+    width: min(96vw, calc(96vh * 2));
+    aspect-ratio: 2 / 1;
+    background: #020302;
+    border-radius: 18px;
+    box-shadow: 0 0 60px rgba(40,255,110,0.10), inset 0 0 120px rgba(0,0,0,0.85);
+    overflow: hidden;
+  }
+  #screen {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    filter: drop-shadow(0 0 3px rgba(80,255,140,0.35)) contrast(1.05) brightness(1.02);
+    cursor: crosshair;
+  }
+  .scanlines {
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0)   0px,
+      rgba(0,0,0,0)   2px,
+      rgba(0,0,0,0.22) 3px
+    );
+    mix-blend-mode: multiply;
+    animation: flicker 4s infinite steps(60);
+  }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+  }
+  @keyframes flicker {
+    0%,100% { opacity: 1; }
+    31%  { opacity: .96; }
+    32%  { opacity: 1; }
+    67%  { opacity: .97; }
+    68%  { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div id="frame">
+  <div id="crt">
+    <canvas id="screen"></canvas>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ================= YATD — Yet Another Tower Defense =================
+   A NetHack-flavored ASCII tower defense. Everything lives in this file. */
+
+/* ---------- terminal grid ---------- */
+const COLS = 80, ROWS = 24;        // row 0: messages, 1..21: map, 22-23: status
+const MAPW = 80, MAPH = 21, MAPY = 1;
+const CW = 12, CH = 20;
+
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+let dpr = 1;
+function fitCanvas() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = COLS * CW * dpr;
+  canvas.height = ROWS * CH * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '16px "DejaVu Sans Mono", "Menlo", "Consolas", monospace';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+}
+fitCanvas();
+window.addEventListener("resize", fitCanvas);
+
+// character buffer
+const buf = [];
+for (let y = 0; y < ROWS; y++) {
+  buf.push([]);
+  for (let x = 0; x < COLS; x++) buf[y].push({ ch: " ", fg: "#4a7a4a", bg: null });
+}
+function put(x, y, ch, fg, bg) {
+  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+  const c = buf[y][x];
+  c.ch = ch; c.fg = fg; if (bg !== undefined) c.bg = bg;
+}
+function text(x, y, s, fg, bg) {
+  for (let i = 0; i < s.length; i++) put(x + i, y, s[i], fg, bg);
+}
+function clearBuf() {
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const c = buf[y][x]; c.ch = " "; c.fg = "#4a7a4a"; c.bg = null;
+  }
+}
+function blit() {
+  ctx.fillStyle = "#030503";
+  ctx.fillRect(0, 0, COLS * CW, ROWS * CH);
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const c = buf[y][x];
+    if (c.bg) {
+      ctx.fillStyle = c.bg;
+      ctx.fillRect(x * CW, y * CH, CW, CH);
+    }
+    if (c.ch !== " ") {
+      ctx.fillStyle = c.fg;
+      ctx.fillText(c.ch, x * CW + CW / 2, y * CH + CH / 2 + 1);
+    }
+  }
+}
+
+/* ---------- dungeon map ---------- */
+// rooms: floor rectangles [x1,y1,x2,y2]; walls drawn one cell out
+const ROOMS = [
+  [1, 1, 8, 5], [12, 6, 20, 12], [2, 14, 9, 19], [26, 1, 34, 7],
+  [44, 13, 52, 19], [62, 4, 70, 11], [73, 14, 78, 19],
+];
+const WAYPOINTS = [
+  [2, 2], [16, 2], [16, 9], [5, 9], [5, 17], [30, 17], [30, 3],
+  [48, 3], [48, 17], [66, 17], [66, 8], [76, 8], [76, 18],
+];
+const FOUNTAINS = [[4, 16], [64, 6], [28, 5]];
+
+const map = [];            // MAPH x MAPW of glyphs; ' ' = solid rock
+for (let y = 0; y < MAPH; y++) map.push(new Array(MAPW).fill(" "));
+
+for (const [x1, y1, x2, y2] of ROOMS) {
+  for (let y = y1 - 1; y <= y2 + 1; y++) for (let x = x1 - 1; x <= x2 + 1; x++) {
+    if (y < 0 || x < 0 || y >= MAPH || x >= MAPW) continue;
+    if (y === y1 - 1 || y === y2 + 1) map[y][x] = "-";
+    else if (x === x1 - 1 || x === x2 + 1) map[y][x] = "|";
+    else map[y][x] = ".";
+  }
+}
+// carve the creep path
+const path = [];           // ordered [x,y]
+const pathIdx = new Map(); // "x,y" -> index along path
+{
+  let [cx, cy] = WAYPOINTS[0];
+  const visit = (x, y) => {
+    const k = x + "," + y;
+    if (!pathIdx.has(k)) { pathIdx.set(k, path.length); path.push([x, y]); }
+    const g = map[y][x];
+    if (g === " ") map[y][x] = "#";
+    else if (g === "|" || g === "-") map[y][x] = "+";
+  };
+  visit(cx, cy);
+  for (let i = 1; i < WAYPOINTS.length; i++) {
+    const [tx, ty] = WAYPOINTS[i];
+    const dx = Math.sign(tx - cx), dy = Math.sign(ty - cy);
+    while (cx !== tx || cy !== ty) { cx += dx; cy += dy; visit(cx, cy); }
+  }
+}
+map[WAYPOINTS[0][1]][WAYPOINTS[0][0]] = "<";
+const END = WAYPOINTS[WAYPOINTS.length - 1];
+map[END[1]][END[0]] = ">";
+for (const [x, y] of FOUNTAINS) if (map[y][x] === ".") map[y][x] = "{";
+
+const onPath = (x, y) => pathIdx.has(x + "," + y);
+const buildable = (x, y) =>
+  map[y] && map[y][x] === "." && !onPath(x, y) && !towerAt(x, y);
+const trapPlaceable = (x, y) => {
+  const g = map[y] && map[y][x];
+  return (g === "#" || g === "+") && onPath(x, y) && !towerAt(x, y);
+};
+
+const TERRAIN_COLOR = {
+  "-": "#9aa88a", "|": "#9aa88a", ".": "#3d6b3d", "#": "#6e6e5c",
+  "+": "#c8a832", "<": "#e8e8d8", ">": "#e8e8d8", "{": "#4aa8ff", " ": "#000",
+};
+
+/* ---------- data tables ---------- */
+const TOWERS = {
+  1: { ch: "W", name: "Wand of Striking", cost: 10, dmg: 5, range: 5.0, cd: 0.55,
+       kind: "bolt", fg: "#e8e850",
+       desc: "cheap, quick single-target bolts" },
+  2: { ch: "%", name: "Acid Blob", cost: 25, dmg: 7, range: 4.0, cd: 1.2,
+       kind: "splash", splash: 1.6, fg: "#50e850",
+       desc: "lobs acid; splash damage" },
+  3: { ch: "F", name: "Frost Fountain", cost: 20, dmg: 2, range: 3.5, cd: 0.7,
+       kind: "slow", slow: 0.5, slowDur: 2.0, fg: "#50c8e8",
+       desc: "chills and slows nearby monsters" },
+  4: { ch: "^", name: "Fire Trap", cost: 15, dmg: 14, range: 0, cd: 0.5,
+       kind: "trap", fg: "#e85050",
+       desc: "burns monsters standing on it (place ON the corridor)" },
+};
+const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 3;
+const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
+
+const MONSTERS = {
+  r: { name: "sewer rat", hp: 9,   spd: 3.4, bounty: 2,  leak: 1,  fg: "#b8825a" },
+  k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
+  a: { name: "giant ant", hp: 8,   spd: 4.0, bounty: 1,  leak: 1,  fg: "#d0d050" },
+  o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
+  Z: { name: "zombie",    hp: 85,  spd: 1.1, bounty: 8,  leak: 2,  fg: "#a8b8a8" },
+  T: { name: "troll",     hp: 150, spd: 1.6, bounty: 15, leak: 3,  fg: "#50b8b8", regen: 3 },
+  D: { name: "red dragon",hp: 1400, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
+};
+// waves: groups of {t: type, n: count, gap: seconds between spawns}
+const WAVES = [
+  [{ t: "r", n: 8,  gap: 0.9 }],
+  [{ t: "k", n: 10, gap: 0.8 }],
+  [{ t: "r", n: 8,  gap: 0.5 }, { t: "k", n: 6, gap: 0.8 }],
+  [{ t: "o", n: 10, gap: 1.0 }],
+  [{ t: "a", n: 15, gap: 0.35 }, { t: "k", n: 5, gap: 0.7 }],
+  [{ t: "Z", n: 9,  gap: 1.1 }],
+  [{ t: "o", n: 12, gap: 0.7 }, { t: "a", n: 10, gap: 0.3 }],
+  [{ t: "Z", n: 8,  gap: 0.9 }, { t: "T", n: 4, gap: 1.6 }],
+  [{ t: "k", n: 20, gap: 0.3 }, { t: "o", n: 10, gap: 0.6 }, { t: "T", n: 6, gap: 1.4 }],
+  [{ t: "o", n: 10, gap: 0.8 }, { t: "D", n: 1, gap: 1.0 }],
+];
+const waveHpScale = (w) => 1 + 0.22 * (w - 1);
+
+/* ---------- game state ---------- */
+const G = {
+  state: "title",          // title | build | wave | won | lost
+  gold: 40, hp: 20, maxHp: 20,
+  wave: 0, score: 0, kills: 0,
+  towers: [], creeps: [], fx: [], floats: [],
+  spawnQueue: [], spawnTimer: 0,
+  selType: 1, selTower: null,
+  cursor: { x: 40, y: 10, on: false },
+  hover: { x: -1, y: -1 },
+  speed: 1, autoStart: false, help: false,
+  msg: "Welcome to YATD!  Press ? for help.", msgAge: 0,
+  time: 0,
+};
+window.G = G; // test hook
+
+function towerAt(x, y) { return G.towers.find(t => t.x === x && t.y === y); }
+function message(s) { G.msg = s; G.msgAge = 0; }
+
+function resetGame() {
+  G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
+  G.score = 0; G.kills = 0;
+  G.towers = []; G.creeps = []; G.fx = []; G.floats = [];
+  G.spawnQueue = []; G.selTower = null; G.selType = 1;
+  G.speed = 1; G.autoStart = false; G.help = false;
+  message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+}
+
+function startWave() {
+  if (G.state !== "build" || G.wave >= WAVES.length) return;
+  G.wave++;
+  G.state = "wave";
+  G.spawnQueue = [];
+  let delay = 0.5;
+  for (const grp of WAVES[G.wave - 1]) {
+    for (let i = 0; i < grp.n; i++) {
+      G.spawnQueue.push({ at: delay, t: grp.t });
+      delay += grp.gap;
+    }
+    delay += 1.5;
+  }
+  G.spawnTimer = 0;
+  const boss = WAVES[G.wave - 1].some(g => MONSTERS[g.t].boss);
+  message(boss
+    ? "You feel a draft... something HUGE stirs on the up staircase!"
+    : "Wave " + G.wave + " pours in from the up staircase...");
+}
+
+function spawnCreep(type) {
+  const m = MONSTERS[type];
+  G.creeps.push({
+    type, prog: 0,
+    hp: Math.round(m.hp * waveHpScale(G.wave)),
+    maxHp: Math.round(m.hp * waveHpScale(G.wave)),
+    spd: m.spd, slowUntil: 0, hitFlash: 0,
+  });
+}
+function creepCell(c) { return path[Math.min(path.length - 1, Math.floor(c.prog))]; }
+
+function buildTower(type, x, y) {
+  const spec = TOWERS[type];
+  const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
+  if (!ok) {
+    message(spec.kind === "trap"
+      ? "Traps go ON the corridor, not beside it."
+      : "You cannot build there.");
+    return false;
+  }
+  if (G.gold < spec.cost) { message("You cannot afford that. (" + spec.cost + " zorkmids)"); return false; }
+  G.gold -= spec.cost;
+  G.towers.push({ type, x, y, lvl: 1, cd: 0, spent: spec.cost });
+  message("You conjure a " + spec.name + ".");
+  return true;
+}
+function upgradeTower(t) {
+  if (!t) return;
+  if (t.lvl >= MAX_LVL) { message("It is already fully enchanted."); return; }
+  const cost = upgradeCost(t);
+  if (G.gold < cost) { message("Enchanting costs " + cost + " zorkmids; you are short."); return; }
+  G.gold -= cost; t.spent += cost; t.lvl++;
+  message("Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")");
+}
+function sellTower(t) {
+  if (!t) return;
+  const refund = Math.floor(t.spent * 0.7);
+  G.gold += refund;
+  G.towers = G.towers.filter(x => x !== t);
+  if (G.selTower === t) G.selTower = null;
+  message("You dismantle the " + TOWERS[t.type].name + " for " + refund + " zorkmids.");
+}
+const towerDmg = (t) => Math.round(TOWERS[t.type].dmg * Math.pow(UPG_MULT, t.lvl - 1));
+const towerRange = (t) => TOWERS[t.type].range + UPG_RANGE * (t.lvl - 1);
+
+/* ---------- combat ---------- */
+function damageCreep(c, dmg) {
+  c.hp -= dmg; c.hitFlash = 0.1;
+  if (c.hp <= 0 && !c.dead) {
+    c.dead = true;
+    const m = MONSTERS[c.type];
+    G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
+    const [x, y] = creepCell(c);
+    G.floats.push({ x, y, s: "+" + m.bounty + "$", ttl: 0.9, fg: "#e8e850" });
+    if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph!");
+  }
+}
+function beamFx(x1, y1, x2, y2, fg) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const n = Math.max(Math.abs(dx), Math.abs(dy));
+  const ch = dx === 0 ? "|" : dy === 0 ? "-" : (dx > 0) === (dy > 0) ? "\\" : "/";
+  const cells = [];
+  for (let i = 1; i < n; i++)
+    cells.push([Math.round(x1 + dx * i / n), Math.round(y1 + dy * i / n)]);
+  G.fx.push({ cells, ch, fg, ttl: 0.08 });
+}
+function splashFx(x, y, fg) {
+  const cells = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+    cells.push([x + dx, y + dy]);
+  G.fx.push({ cells, ch: "*", fg, ttl: 0.12 });
+}
+
+function updateTowers(dt) {
+  for (const t of G.towers) {
+    t.cd -= dt;
+    if (t.cd > 0) continue;
+    const spec = TOWERS[t.type];
+    const dmg = towerDmg(t), range = towerRange(t);
+    if (spec.kind === "trap") {
+      const victims = G.creeps.filter(c => {
+        const [x, y] = creepCell(c); return !c.dead && x === t.x && y === t.y;
+      });
+      if (victims.length) {
+        for (const c of victims) damageCreep(c, dmg);
+        splashFx(t.x, t.y, spec.fg);
+        t.cd = spec.cd;
+      }
+      continue;
+    }
+    // pick target(s) furthest along the path within range
+    let targets = G.creeps.filter(c => {
+      if (c.dead) return false;
+      const [x, y] = creepCell(c);
+      return Math.hypot(x - t.x, y - t.y) <= range;
+    }).sort((a, b) => b.prog - a.prog);
+    if (!targets.length) continue;
+    if (spec.kind === "slow") {
+      let hit = false;
+      for (const c of targets) {
+        c.slowUntil = G.time + spec.slowDur; c.slowFactor = spec.slow;
+        damageCreep(c, dmg); hit = true;
+      }
+      if (hit) {
+        const [x, y] = creepCell(targets[0]);
+        beamFx(t.x, t.y, x, y, spec.fg);
+        t.cd = spec.cd;
+      }
+    } else if (spec.kind === "splash") {
+      const c0 = targets[0];
+      const [cx, cy] = creepCell(c0);
+      for (const c of G.creeps) {
+        if (c.dead) continue;
+        const [x, y] = creepCell(c);
+        if (Math.hypot(x - cx, y - cy) <= spec.splash) damageCreep(c, dmg);
+      }
+      splashFx(cx, cy, spec.fg);
+      t.cd = spec.cd;
+    } else { // bolt
+      damageCreep(targets[0], dmg);
+      const [x, y] = creepCell(targets[0]);
+      beamFx(t.x, t.y, x, y, spec.fg);
+      t.cd = spec.cd;
+    }
+  }
+}
+
+function updateCreeps(dt) {
+  for (const c of G.creeps) {
+    if (c.dead) continue;
+    const m = MONSTERS[c.type];
+    if (m.regen && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + m.regen * dt);
+    let spd = c.spd;
+    if (G.time < c.slowUntil) spd *= c.slowFactor;
+    c.prog += spd * dt;
+    c.hitFlash = Math.max(0, c.hitFlash - dt);
+    if (c.prog >= path.length - 1) {
+      c.dead = true; c.leaked = true;
+      G.hp -= m.leak;
+      message("The " + m.name + " descends the stairs!  You lose " + m.leak + " HP.");
+      if (G.hp <= 0) { G.hp = 0; G.state = "lost"; }
+    }
+  }
+  G.creeps = G.creeps.filter(c => !c.dead);
+}
+
+function update(dt) {
+  G.time += dt;
+  G.msgAge += dt;
+  for (const f of G.fx) f.ttl -= dt;
+  G.fx = G.fx.filter(f => f.ttl > 0);
+  for (const f of G.floats) f.ttl -= dt;
+  G.floats = G.floats.filter(f => f.ttl > 0);
+
+  if (G.state !== "wave") return;
+
+  // spawning
+  G.spawnTimer += dt;
+  while (G.spawnQueue.length && G.spawnQueue[0].at <= G.spawnTimer) {
+    spawnCreep(G.spawnQueue.shift().t);
+  }
+  updateTowers(dt);
+  updateCreeps(dt);
+
+  if (G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
+    // wave cleared
+    const bonus = 10 + G.wave * 2;
+    G.gold += bonus; G.score += 100 * G.wave;
+    if (G.wave >= WAVES.length) {
+      G.state = "won";
+      G.score += G.hp * 50;
+    } else {
+      G.state = "build";
+      message("The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids." +
+        (G.autoStart ? "" : "  SPACE for wave " + (G.wave + 1) + "."));
+      if (G.autoStart) startWave();
+    }
+  }
+}
+
+/* ---------- rendering ---------- */
+function drawMap() {
+  for (let y = 0; y < MAPH; y++) for (let x = 0; x < MAPW; x++) {
+    const g = map[y][x];
+    if (g !== " ") put(x, MAPY + y, g, TERRAIN_COLOR[g]);
+  }
+}
+function drawRange(cx, cy, range, tint) {
+  if (range <= 0) return;
+  for (let y = 0; y < MAPH; y++) for (let x = 0; x < MAPW; x++) {
+    if (map[y][x] === " ") continue;
+    if (Math.hypot(x - cx, y - cy) <= range) buf[MAPY + y][x].bg = tint;
+  }
+}
+function drawGame() {
+  clearBuf();
+  drawMap();
+
+  // range preview: selected tower, or placement preview at hover/cursor
+  const hx = G.cursor.on ? G.cursor.x : G.hover.x;
+  const hy = G.cursor.on ? G.cursor.y : G.hover.y;
+  if (G.selTower) {
+    drawRange(G.selTower.x, G.selTower.y, towerRange(G.selTower), "#12241a");
+  } else if (hy >= 0 && hy < MAPH) {
+    const spec = TOWERS[G.selType];
+    const ok = spec.kind === "trap" ? trapPlaceable(hx, hy) : buildable(hx, hy);
+    if (ok) drawRange(hx, hy, spec.range, "#12241a");
+  }
+
+  for (const t of G.towers) {
+    const spec = TOWERS[t.type];
+    const bright = ["", "", "#ffffff", "#ffd0ff"][t.lvl] || spec.fg;
+    put(t.x, MAPY + t.y, spec.ch, t.lvl === 1 ? spec.fg : bright,
+        t === G.selTower ? "#243024" : undefined);
+  }
+  for (const c of G.creeps) {
+    const [x, y] = creepCell(c);
+    const m = MONSTERS[c.type];
+    put(x, MAPY + y, c.type, c.hitFlash > 0 ? "#ffffff" : m.fg);
+  }
+  for (const f of G.fx)
+    for (const [x, y] of f.cells)
+      if (y >= 0 && y < MAPH && map[y][x] !== " ") put(x, MAPY + y, f.ch, f.fg);
+  for (const f of G.floats) text(f.x, MAPY + f.y, f.s, f.fg);
+
+  // keyboard cursor
+  if (G.cursor.on) {
+    const cell = buf[MAPY + G.cursor.y][G.cursor.x];
+    cell.bg = "#3a4a3a";
+  }
+
+  // message line
+  const fade = G.msgAge > 6 ? "#4a6a4a" : "#d8e8c8";
+  text(0, 0, G.msg.slice(0, COLS), fade);
+
+  // status lines
+  const spd = G.speed > 1 ? "  x" + G.speed : "";
+  const auto = G.autoStart ? "  [auto]" : "";
+  text(0, 22,
+    ("Dlvl:1  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
+     G.wave + "/" + WAVES.length + "  Kills:" + G.kills + "  Score:" + G.score +
+     spd + auto).padEnd(COLS).slice(0, COLS), "#c8d8b8");
+
+  let l2;
+  if (G.selTower) {
+    const t = G.selTower, spec = TOWERS[t.type];
+    l2 = spec.ch + " " + spec.name + " L" + t.lvl + "  dmg:" + towerDmg(t) +
+      "  rng:" + towerRange(t).toFixed(1) +
+      (t.lvl < MAX_LVL ? "  [u]pgrade $" + upgradeCost(t) : "  (max)") +
+      "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC:deselect";
+  } else {
+    l2 = Object.entries(TOWERS).map(([k, s]) =>
+      (+k === G.selType ? ">" : " ") + k + ":" + s.ch + " $" + s.cost
+    ).join(" ") + "   SPACE:wave  ?:help";
+    // hovered monster info
+    if (hy >= 0 && hy < MAPH) {
+      const c = G.creeps.find(c => {
+        const [x, y] = creepCell(c); return x === hx && y === hy;
+      });
+      if (c) l2 = "You see: " + MONSTERS[c.type].name + "  HP:" +
+        Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "");
+    }
+  }
+  text(0, 23, l2.padEnd(COLS).slice(0, COLS), "#8aa87a");
+
+  if (G.help) drawHelp();
+}
+
+function drawCentered(lines, y0, fg) {
+  lines.forEach((s, i) => text(Math.floor((COLS - s.length) / 2), y0 + i, s, fg));
+}
+function drawHelp() {
+  const x0 = 8, y0 = 3, w = 64, h = 17;
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
+    put(x, y, " ", "#4a7a4a", "#0a120a");
+  const lines = [
+    "--------------------- YATD Help ---------------------",
+    "",
+    "Monsters march from < to >.  Each leak costs you HP.",
+    "",
+    "TOWERS (select 1-4, click a floor tile . to build):",
+    " 1 W Wand of Striking  $10  fast single-target bolts",
+    " 2 % Acid Blob         $25  splash damage",
+    " 3 F Frost Fountain    $20  chills & slows monsters",
+    " 4 ^ Fire Trap         $15  place ON the corridor #",
+    "",
+    "KEYS:  SPACE start wave    u upgrade   s sell",
+    "       hjkl/arrows cursor  ENTER build/select",
+    "       a auto-start  + - speed  R restart  ? close",
+    "",
+    "MONSTERS: r rat  k kobold  a ant  o orc  Z zombie",
+    "          T troll (regenerates!)  D dragon (boss)",
+  ];
+  lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
+}
+
+function drawTitle() {
+  clearBuf();
+  drawMap();
+  for (let y = 1; y < 22; y++) for (let x = 0; x < COLS; x++) {
+    const c = buf[y][x]; if (c.ch !== " ") c.fg = "#1c3520";
+  }
+  drawCentered([
+    "__   __ _  _____  ____",
+    "\\ \\ / // \\|_   _||  _ \\",
+    " \\ V // _ \\ | |  | | | |",
+    "  | |/ ___ \\| |  | |_| |",
+    "  |_/_/   \\_\\_|  |____/",
+  ], 4, "#50ff96");
+  drawCentered(["Y e t   A n o t h e r   T o w e r   D e f e n s e"], 11, "#c8e8b8");
+  drawCentered(["a NetHack-flavored dungeon defense"], 13, "#6a8a6a");
+  if (Math.floor(G.time * 1.5) % 2 === 0)
+    drawCentered(["-- press any key to descend --"], 17, "#e8e850");
+  drawCentered(["v1.0  |  ? in game for help"], 20, "#3a5a3a");
+}
+function drawWon() {
+  drawGame();
+  const y0 = 4;
+  for (let y = y0; y < y0 + 13; y++) for (let x = 14; x < 66; x++)
+    put(x, y, " ", "#4a7a4a", "#0a120a");
+  drawCentered([
+    "*  *  *  V I C T O R Y  *  *  *",
+    "",
+    "The dragon falls.  The staircase crumbles behind it.",
+    "You feel the dungeon's gratitude wash over you.",
+    "",
+    "You ascend to demigodhood...",
+    "",
+    "Final score: " + G.score + "   Kills: " + G.kills + "   HP left: " + G.hp,
+    "",
+    "-- press R to play again --",
+  ], y0 + 1, "#e8e850");
+}
+function drawLost() {
+  clearBuf();
+  drawCentered([
+    "               ----------",
+    "              /          \\",
+    "             /    REST    \\",
+    "            /      IN      \\",
+    "           /     PEACE      \\",
+    "          /                  \\",
+    "          |     the Keeper   |",
+    "          |    " + String(G.score).padStart(6) + " points   |",
+    "          |   overrun by a   |",
+    "          |   monster horde  |",
+    "          |     wave " + String(G.wave).padStart(2) + "      |",
+    "         *|     *  *  *      | *",
+    " ________)/\\\\_//(\\/(/\\)/\\//\\/|_)_______",
+  ], 3, "#a8b8a8");
+  drawCentered(["Do you want your possessions identified? [ynq]  (q, obviously)"], 18, "#c8d8b8");
+  drawCentered(["-- press R to try again --"], 20, "#e8e850");
+}
+
+/* ---------- input ---------- */
+function cellFromEvent(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / r.width * COLS);
+  const y = Math.floor((e.clientY - r.top) / r.height * ROWS);
+  return [x, y - MAPY];
+}
+canvas.addEventListener("mousemove", (e) => {
+  const [x, y] = cellFromEvent(e);
+  G.hover.x = x; G.hover.y = y; G.cursor.on = false;
+});
+canvas.addEventListener("mousedown", (e) => {
+  if (G.state === "title") { resetGame(); return; }
+  if (G.state === "won" || G.state === "lost") return;
+  const [x, y] = cellFromEvent(e);
+  if (y < 0 || y >= MAPH) return;
+  activate(x, y);
+});
+function activate(x, y) {
+  if (G.help) { G.help = false; return; }
+  const t = towerAt(x, y);
+  if (t) { G.selTower = t; return; }
+  G.selTower = null;
+  buildTower(G.selType, x, y);
+}
+
+const DIRS = {
+  h: [-1, 0], j: [0, 1], k: [0, -1], l: [1, 0],
+  ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1], ArrowRight: [1, 0],
+  y: [-1, -1], u2: [1, -1], b: [-1, 1], n: [1, 1],
+};
+window.addEventListener("keydown", (e) => {
+  if (e.key === " ") e.preventDefault();
+  if (G.state === "title") { resetGame(); return; }
+  if (G.state === "won" || G.state === "lost") {
+    if (e.key === "r" || e.key === "R") resetGame();
+    return;
+  }
+  if (e.key === "?") { G.help = !G.help; return; }
+  if (G.help && e.key === "Escape") { G.help = false; return; }
+
+  if (e.key >= "1" && e.key <= "4") {
+    G.selType = +e.key; G.selTower = null;
+    message("Selected: " + TOWERS[G.selType].name + " ($" + TOWERS[G.selType].cost + ") — " + TOWERS[G.selType].desc);
+    return;
+  }
+  switch (e.key) {
+    case " ": startWave(); return;
+    case "a": G.autoStart = !G.autoStart;
+      message("Auto-start waves: " + (G.autoStart ? "on" : "off")); return;
+    case "+": case "=": G.speed = Math.min(4, G.speed * 2);
+      message("Game speed x" + G.speed); return;
+    case "-": G.speed = Math.max(1, G.speed / 2);
+      message("Game speed x" + G.speed); return;
+    case "u": if (G.selTower) { upgradeTower(G.selTower); return; } break;
+    case "s": if (G.selTower) { sellTower(G.selTower); return; } break;
+    case "R": resetGame(); return;
+    case "Escape": G.selTower = null; return;
+    case "Enter":
+      if (G.cursor.on) activate(G.cursor.x, G.cursor.y);
+      return;
+  }
+  const d = DIRS[e.key];
+  if (d) {
+    if (!G.cursor.on) {
+      G.cursor.on = true;
+      if (G.hover.y >= 0 && G.hover.y < MAPH) {
+        G.cursor.x = G.hover.x; G.cursor.y = G.hover.y;
+      }
+    } else {
+      G.cursor.x = Math.max(0, Math.min(MAPW - 1, G.cursor.x + d[0]));
+      G.cursor.y = Math.max(0, Math.min(MAPH - 1, G.cursor.y + d[1]));
+    }
+  }
+});
+
+// hooks for automated testing
+window.YATD = { buildTower, upgradeTower, sellTower, startWave, resetGame,
+                buildable, trapPlaceable, towerAt, path, map };
+
+/* ---------- main loop ---------- */
+let last = performance.now(), acc = 0;
+const STEP = 1 / 60;
+function frame(now) {
+  let dt = Math.min(0.25, (now - last) / 1000);
+  last = now;
+  acc += dt * G.speed;
+  while (acc >= STEP) { update(STEP); acc -= STEP; }
+  if (G.state === "title") { G.time += dt; drawTitle(); }
+  else if (G.state === "won") drawWon();
+  else if (G.state === "lost") drawLost();
+  else drawGame();
+  blit();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
