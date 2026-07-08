@@ -32,15 +32,25 @@ pack.
 
 ## Towers
 
+Tower glyphs are always NetHack object-class punctuation, never a
+letter — letters are reserved for monsters, so nothing on the map is
+ever ambiguous about what it is.
+
 | Key | Glyph | Tower            | Cost | What it does                          |
 |-----|-------|------------------|------|---------------------------------------|
-| `1` | `W`   | Wand of Striking | $10  | Fast single-target bolts               |
-| `2` | `%`   | Acid Blob        | $25  | Lobbed splash damage                   |
-| `3` | `F`   | Frost Fountain   | $20  | Chills and slows monsters in range     |
+| `1` | `/`   | Wand of Striking | $10  | Fast single-target bolts               |
+| `2` | `0`   | Acid Blob        | $25  | Lobbed splash damage                   |
+| `3` | `{`   | Frost Fountain   | $20  | Chills and slows monsters in range     |
 | `4` | `^`   | Fire Trap        | $15  | Burns monsters — place ON the corridor |
 
+Every tower except the fire trap needs a clear line of sight — thick
+walls block shots, so a tower can't hit monsters marching down the
+corridor on the other side of a wall.
+
 Towers can be enchanted twice (`u`) for more damage and range, or sold
-(`s`) for a 70% refund.
+(`s`) for a 70% refund. You can build anywhere on open room floor (`.`)
+except the exact corridor line monsters walk — the fire trap is the
+opposite, it only goes directly on that line.
 
 ## Monsters
 

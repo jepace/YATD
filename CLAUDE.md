@@ -36,7 +36,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
    - Placement rules: `buildable(x,y)` = room floor off-path;
      `trapPlaceable(x,y)` = on-path corridor/door. Both exclude occupied.
 
-3. **Data tables** — `TOWERS` (1–4, keyed by hotkey), `MONSTERS` (keyed by
+3. **Data tables** — `TOWERS` (1–4, keyed by hotkey; glyphs are always
+   NetHack object-class punctuation — `/` `0` `{` `^` — never a letter,
+   since letters are reserved for monsters), `MONSTERS` (keyed by
    their map glyph: `r k a o Z T D`). `WAVES` is regenerated per game by
    `genWaves()`: each wave spends a point budget (~8×1.5^(w−1), ±15%) on
    1–3 monster types from a pool gated by minimum wave (`min`); wave 10
@@ -69,9 +71,15 @@ The `<script>` is organized top-to-bottom in sections (marked with
 
 5. **Combat** — `updateTowers(dt)` handles all four tower kinds (`bolt`,
    `splash`, `slow`, `trap`); targeting is "furthest along path in
-   Euclidean range". `damageCreep()` handles death, bounty, and messages.
-   Visuals are `G.fx` only (short-lived beam/splash glyph overlays) — no
-   floating combat text; all of that is `message()` calls now.
+   Euclidean range AND line of sight" — `hasLineOfSight(x0,y0,x1,y1)`
+   (Bresenham walk, blocked by `" "`/`"|"`/`"-"` cells) gates every
+   non-trap tower so they can't shoot through walls into an adjacent
+   corridor; splash's secondary AoE victims are also LOS-checked from the
+   impact point, not just the primary target from the tower. Traps don't
+   need LOS (contact-triggered). `damageCreep()` handles death, bounty,
+   and messages. Visuals are `G.fx` only (short-lived beam/splash glyph
+   overlays) — no floating combat text; all of that is `message()` calls
+   now.
 
 6. **Rendering** — `drawGame()` rebuilds the whole cell buffer every
    frame: map → range highlight → towers → creeps → fx → cursor →
@@ -105,15 +113,31 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put
    all gameplay logic in `update(dt)`, never in draw functions.
 
-## Testing (do this before every push)
+## Testing
+
+**Default: don't launch a browser to click through the game.** The user
+has asked to keep this to code review, not play-testing — verify changes
+by reading the diff carefully (trace the affected function calls by
+hand, check for off-by-ones, confirm data-table edits match the format
+of surrounding entries) and running a syntax check:
+
+```bash
+python3 -c "import re; open('/tmp/yatd.js','w').write(re.search(r'<script>(.*)</script>', open('index.html').read(), re.S).group(1))"
+node --check /tmp/yatd.js
+```
+
+That's sufficient for most changes (data-table tweaks, new hotkeys, UI
+text, glyph/color changes, refactors). Reserve full headless-browser
+verification for when the user explicitly asks for it, or for changes
+where static reading genuinely can't tell you the outcome (new physics/
+collision math, procedural generation quality, anything touching win/
+loss balance). When that's asked for:
 
 `window.G` (live state) and `window.YATD` (API: `buildTower`,
 `upgradeTower`, `sellTower`, `startWave`, `resetGame`, `buildable`,
 `trapPlaceable`, `towerAt`, `path`, `map`) are exposed as test hooks —
-keep them working.
-
-Verify with headless Chromium (Playwright). Pattern that works in the
-Claude Code cloud environment:
+keep them working. Verify with headless Chromium (Playwright); this
+pattern works in the Claude Code cloud environment:
 
 ```js
 chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })

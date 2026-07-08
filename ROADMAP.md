@@ -10,11 +10,21 @@ starts the wave when in build phase), procedural dungeon generation
 system), random item drops (scroll of fireball / potion of haste / wand
 of cold / gold piles) with an `i` inventory overlay, a `Ctrl-P` message
 log (NetHack-style — replaced the old floating "+2$" combat text
-entirely; all events are `message()` calls now), and non-sticky tower
-placement (`1`-`4` must be pressed again before each build). New item
-ideas should extend `dropItem()` and the `G.inv` + `r/q/z` key pattern.
-New overlays should follow the `G.overlay` + `overlayBox()` pattern in
-`drawHelp`/`drawInventory`/`drawLog` — see `CLAUDE.md` section 6.
+entirely; all events are `message()` calls now), non-sticky tower
+placement (`1`-`4` must be pressed again before each build), creep lane
+variation in rooms (`jit`), and line-of-sight for ranged towers
+(`hasLineOfSight`, walls block shots — traps are exempt). New item ideas
+should extend `dropItem()` and the `G.inv` + `r/q/z` key pattern. New
+overlays should follow the `G.overlay` + `overlayBox()` pattern in
+`drawHelp`/`drawInventory`/`drawLog` — see `CLAUDE.md` section 6. New
+towers must use NetHack object-class punctuation for their glyph, never
+a letter — letters are exclusively monsters now (see `CLAUDE.md` section
+3); idea 7 below has been updated to match.
+
+**Process note:** the user has asked that changes here be verified by
+code review, not by launching a headless browser to click through the
+game — see `CLAUDE.md`'s Testing section for the default (syntax-check
+only) vs. when full browser verification is still warranted.
 
 ## High value, moderate effort
 
@@ -46,10 +56,12 @@ New overlays should follow the `G.overlay` + `overlayBox()` pattern in
    feel a malignant aura..."): monsters hasted, towers -25% range, double
    bounty, fog (map dimmed outside tower ranges). One modifier every few
    waves keeps builds honest.
-7. **Tower variety.** `L` Lightning rod (chain to 3 targets), `@` Hired
-   adventurer (blocks the corridor, melees, has HP, monsters attack it),
-   `"` Amulet shrine (aura buff to adjacent towers). Keep total ≤ 7 with
-   hotkeys 1–7.
+7. **Tower variety.** `\` Lightning rod (chain to 3 targets, needs LOS
+   like the other ranged towers), `)` Hired adventurer (blocks the
+   corridor, melees, has HP, monsters attack it — no LOS needed, it's
+   melee), `"` Amulet shrine (aura buff to adjacent towers). Keep total
+   ≤ 7 with hotkeys 1–7; pick glyphs from unused NetHack object-class
+   punctuation, never a letter (see the process note above).
 8. **Endless mode.** After wave 10 victory, offer "descend anyway":
    procedurally scaled waves (reuse `waveHpScale`, cycle monster mixes,
    boss every 5) until death; score-chasing pairs well with idea 2.
