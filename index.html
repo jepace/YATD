@@ -239,6 +239,13 @@ function genLevel() {
   }
 }
 
+// perpendicular direction of travel at a path index (for creep lane jitter)
+function pathPerp(idx) {
+  const i0 = Math.max(0, idx - 1), i1 = Math.min(path.length - 1, idx + 1);
+  const dx = Math.sign(path[i1][0] - path[i0][0]);
+  const dy = Math.sign(path[i1][1] - path[i0][1]);
+  return [-dy, dx];
+}
 const onPath = (x, y) => pathIdx.has(x + "," + y);
 const buildable = (x, y) =>
   map[y] && map[y][x] === "." && !onPath(x, y) && !towerAt(x, y);
@@ -383,10 +390,23 @@ function spawnCreep(type) {
     type, prog: 0,
     hp: Math.round(m.hp * scale),
     maxHp: Math.round(m.hp * scale),
-    spd: m.spd, slowUntil: 0, hitFlash: 0,
+    spd: m.spd * (0.85 + rnd() * 0.3),   // don't all march in lockstep
+    jit: ri(-1, 1),                      // a persistent lane, +-1 cell
+    slowUntil: 0, hitFlash: 0,
   });
 }
-function creepCell(c) { return path[Math.min(path.length - 1, Math.floor(c.prog))]; }
+// a creep's cell: usually the exact path tile, but monsters straying into
+// a room (never in 1-wide corridors, so trap alignment stays exact) drift
+// into their assigned lane so they don't all march single-file
+function creepCell(c) {
+  const idx = Math.min(path.length - 1, Math.floor(c.prog));
+  const [x, y] = path[idx];
+  if (!c.jit || map[y][x] !== ".") return [x, y];
+  const [px, py] = pathPerp(idx);
+  const vx = x + px * c.jit, vy = y + py * c.jit;
+  if (map[vy] && map[vy][vx] === ".") return [vx, vy];
+  return [x, y];
+}
 
 function buildTower(type, x, y) {
   const spec = TOWERS[type];

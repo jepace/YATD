@@ -57,8 +57,14 @@ The `<script>` is organized top-to-bottom in sections (marked with
 4. **Game state** — the global `G` object (also `window.G` for tests).
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
    pre-expanded into `G.spawnQueue` (`{at, t}` sorted by time) by
-   `startWave()`. Creeps store `prog`, a float index into `path`;
-   `creepCell(c)` gives their cell. No pathfinding exists or is needed —
+   `startWave()`. Creeps store `prog`, a float index into `path`, plus a
+   per-creep `spd` variance (±15%) and a persistent `jit` lane (-1/0/1)
+   so they don't all march in perfect lockstep. `creepCell(c)` is the
+   single source of truth for a creep's actual cell — it applies `jit`
+   via `pathPerp(idx)` ONLY when the base path cell is room floor `.`
+   (never in 1-wide corridors, so trap alignment and targeting stay
+   exact); it's used for everything: rendering, tower targeting, trap
+   collision, and leak/hover checks. No pathfinding exists or is needed —
    the path is fixed.
 
 5. **Combat** — `updateTowers(dt)` handles all four tower kinds (`bolt`,
