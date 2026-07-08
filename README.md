@@ -17,6 +17,19 @@ of the Dungeons of Doom toward the down staircase `>`. Every monster that
 descends costs you HP. Conjure towers on room floors, enchant them, and
 survive all 10 waves — the last one brings a red dragon.
 
+Like NetHack, **every game is different**: the dungeon layout is
+procedurally generated, wave compositions are randomized, and monsters
+randomly drop items. Add `?seed=N` to the URL to replay a particular
+dungeon (the seed is shown on the title screen).
+
+## Items
+
+Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of
+fireball (`r`ead one to scour every monster with flame), `!` potions of
+haste (`q`uaff to double your towers' speed for 8s), and `/` wands of
+cold (`z`ap to slow everything on the level). Your inventory shows on
+the bottom status line.
+
 ## Towers
 
 | Key | Glyph | Tower            | Cost | What it does                          |
@@ -40,6 +53,7 @@ Towers can be enchanted twice (`u`) for more damage and range, or sold
   selected tower, click a tower to inspect/upgrade/sell.
 - `1`–`4` select tower type · `SPACE` start wave · `u` upgrade · `s` sell
 - `hjkl`/arrows + `ENTER` — full keyboard play, roguelike style
-- `a` auto-start waves · `+`/`-` game speed · `?` help · `R` restart
+- `r` read scroll · `q` quaff potion · `z` zap wand
+- `p` pause · `a` auto-start waves · `+`/`-` game speed · `?` help · `R` restart
 
 Good luck. The dungeon is counting on you.

@@ -123,52 +123,121 @@ function blit() {
   }
 }
 
-/* ---------- dungeon map ---------- */
-// rooms: floor rectangles [x1,y1,x2,y2]; walls drawn one cell out
-const ROOMS = [
-  [1, 1, 8, 5], [12, 6, 20, 12], [2, 14, 9, 19], [26, 1, 34, 7],
-  [44, 13, 52, 19], [62, 4, 70, 11], [73, 14, 78, 19],
-];
-const WAYPOINTS = [
-  [2, 2], [16, 2], [16, 9], [5, 9], [5, 17], [30, 17], [30, 3],
-  [48, 3], [48, 17], [66, 17], [66, 8], [76, 8], [76, 18],
-];
-const FOUNTAINS = [[4, 16], [64, 6], [28, 5]];
+/* ---------- dungeon map (procedurally generated) ---------- */
+// Every game carves a fresh dungeon: a serpentine corridor from < to >
+// plus rooms scattered along it. ?seed=N in the URL replays a dungeon;
+// the current seed is shown on the title screen.
+function mulberry32(s) {
+  return function () {
+    let t = s += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const urlSeed = parseInt(new URLSearchParams(location.search).get("seed"), 10);
+let seedUsed = false;
+function newSeed() {
+  if (!seedUsed && !isNaN(urlSeed)) { seedUsed = true; return urlSeed; }
+  return Math.floor(Math.random() * 2 ** 31);
+}
+let SEED = 0, rnd = Math.random;
+const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
 
 const map = [];            // MAPH x MAPW of glyphs; ' ' = solid rock
 for (let y = 0; y < MAPH; y++) map.push(new Array(MAPW).fill(" "));
-
-for (const [x1, y1, x2, y2] of ROOMS) {
-  for (let y = y1 - 1; y <= y2 + 1; y++) for (let x = x1 - 1; x <= x2 + 1; x++) {
-    if (y < 0 || x < 0 || y >= MAPH || x >= MAPW) continue;
-    if (y === y1 - 1 || y === y2 + 1) map[y][x] = "-";
-    else if (x === x1 - 1 || x === x2 + 1) map[y][x] = "|";
-    else map[y][x] = ".";
-  }
-}
-// carve the creep path
-const path = [];           // ordered [x,y]
+const path = [];           // ordered [x,y]  (mutated in place on regen)
 const pathIdx = new Map(); // "x,y" -> index along path
-{
-  let [cx, cy] = WAYPOINTS[0];
-  const visit = (x, y) => {
+
+// serpentine waypoints: x-columns strictly increase, so no self-crossing
+function genPath() {
+  const xs = [2];
+  while (xs[xs.length - 1] < 62) xs.push(xs[xs.length - 1] + ri(9, 15));
+  xs[xs.length - 1] = Math.min(xs[xs.length - 1], 73);
+  xs.push(77);
+  let down = rnd() < 0.5;
+  let y = down ? ri(2, 5) : ri(14, 17);
+  const wp = [[xs[0], y]];
+  for (let i = 1; i < xs.length; i++) {
+    wp.push([xs[i], y]);
+    if (i < xs.length - 1) {
+      y = down ? ri(14, 17) : ri(2, 5);
+      down = !down;
+      wp.push([xs[i], y]);
+    }
+  }
+  return wp;
+}
+function pathCells(wp) {
+  const cells = [[wp[0][0], wp[0][1]]];
+  let [cx, cy] = wp[0];
+  for (let i = 1; i < wp.length; i++) {
+    const [tx, ty] = wp[i];
+    const dx = Math.sign(tx - cx), dy = Math.sign(ty - cy);
+    while (cx !== tx || cy !== ty) { cx += dx; cy += dy; cells.push([cx, cy]); }
+  }
+  return cells;
+}
+// rooms seeded on random path cells; rejected if too close to another room
+function genRooms(cells) {
+  const rooms = [];
+  const clash = (r) => rooms.some(o =>
+    r[0] - 2 <= o[2] && o[0] - 2 <= r[2] && r[1] - 2 <= o[3] && o[1] - 2 <= r[3]);
+  let tries = 0;
+  while (rooms.length < 8 && tries++ < 250) {
+    const [cx, cy] = cells[ri(0, cells.length - 1)];
+    const w = ri(5, 9), h = ri(3, 5);
+    const x1 = Math.max(1, Math.min(77 - w, cx - ri(0, w)));
+    const y1 = Math.max(1, Math.min(19 - h, cy - ri(0, h)));
+    const r = [x1, y1, x1 + w, y1 + h];
+    if (!clash(r)) rooms.push(r);
+  }
+  return rooms;
+}
+// carve one level into map/path/pathIdx; returns a quality score
+// (buildable floor tiles within tower reach of the path)
+function buildLevel() {
+  for (let y = 0; y < MAPH; y++) map[y].fill(" ");
+  path.length = 0; pathIdx.clear();
+  const wp = genPath();
+  const cells = pathCells(wp);
+  for (const [x1, y1, x2, y2] of genRooms(cells)) {
+    for (let y = y1 - 1; y <= y2 + 1; y++) for (let x = x1 - 1; x <= x2 + 1; x++) {
+      if (y < 0 || x < 0 || y >= MAPH || x >= MAPW) continue;
+      if (y === y1 - 1 || y === y2 + 1) map[y][x] = "-";
+      else if (x === x1 - 1 || x === x2 + 1) map[y][x] = "|";
+      else map[y][x] = ".";
+    }
+  }
+  for (const [x, y] of cells) {
     const k = x + "," + y;
     if (!pathIdx.has(k)) { pathIdx.set(k, path.length); path.push([x, y]); }
     const g = map[y][x];
     if (g === " ") map[y][x] = "#";
     else if (g === "|" || g === "-") map[y][x] = "+";
-  };
-  visit(cx, cy);
-  for (let i = 1; i < WAYPOINTS.length; i++) {
-    const [tx, ty] = WAYPOINTS[i];
-    const dx = Math.sign(tx - cx), dy = Math.sign(ty - cy);
-    while (cx !== tx || cy !== ty) { cx += dx; cy += dy; visit(cx, cy); }
+  }
+  map[wp[0][1]][wp[0][0]] = "<";
+  const end = wp[wp.length - 1];
+  map[end[1]][end[0]] = ">";
+  let deco = 0, guard = 0;
+  while (deco < 3 && guard++ < 200) {
+    const x = ri(1, 78), y = ri(1, 19);
+    if (map[y][x] === "." && !onPath(x, y)) { map[y][x] = "{"; deco++; }
+  }
+  let good = 0;
+  for (let y = 0; y < MAPH; y++) for (let x = 0; x < MAPW; x++) {
+    if (map[y][x] !== "." || onPath(x, y)) continue;
+    if (path.some(([px, py]) => Math.hypot(px - x, py - y) <= 4.5)) good++;
+  }
+  return good;
+}
+function genLevel() {
+  SEED = newSeed();
+  for (let i = 0; i < 80; i++) {
+    rnd = mulberry32(SEED + i);        // deterministic retries per seed
+    if (buildLevel() >= 60 && path.length >= 135) return;
   }
 }
-map[WAYPOINTS[0][1]][WAYPOINTS[0][0]] = "<";
-const END = WAYPOINTS[WAYPOINTS.length - 1];
-map[END[1]][END[0]] = ">";
-for (const [x, y] of FOUNTAINS) if (map[y][x] === ".") map[y][x] = "{";
 
 const onPath = (x, y) => pathIdx.has(x + "," + y);
 const buildable = (x, y) =>
@@ -208,22 +277,47 @@ const MONSTERS = {
   o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
   Z: { name: "zombie",    hp: 85,  spd: 1.1, bounty: 8,  leak: 2,  fg: "#a8b8a8" },
   T: { name: "troll",     hp: 150, spd: 1.6, bounty: 15, leak: 3,  fg: "#50b8b8", regen: 3 },
-  D: { name: "red dragon",hp: 1400, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
+  D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
 };
-// waves: groups of {t: type, n: count, gap: seconds between spawns}
-const WAVES = [
-  [{ t: "r", n: 8,  gap: 0.9 }],
-  [{ t: "k", n: 10, gap: 0.8 }],
-  [{ t: "r", n: 8,  gap: 0.5 }, { t: "k", n: 6, gap: 0.8 }],
-  [{ t: "o", n: 10, gap: 1.0 }],
-  [{ t: "a", n: 15, gap: 0.35 }, { t: "k", n: 5, gap: 0.7 }],
-  [{ t: "Z", n: 9,  gap: 1.1 }],
-  [{ t: "o", n: 12, gap: 0.7 }, { t: "a", n: 10, gap: 0.3 }],
-  [{ t: "Z", n: 8,  gap: 0.9 }, { t: "T", n: 4, gap: 1.6 }],
-  [{ t: "k", n: 20, gap: 0.3 }, { t: "o", n: 10, gap: 0.6 }, { t: "T", n: 6, gap: 1.4 }],
-  [{ t: "o", n: 10, gap: 0.8 }, { t: "D", n: 1, gap: 1.0 }],
-];
+// waves: groups of {t: type, n: count, gap: seconds between spawns}.
+// Regenerated each game by genWaves(): every wave gets a point budget
+// (growing ~1.5x per wave, +-15%) spent on monster types that unlock as
+// waves go on. Wave 10 always ends with the dragon.
+const WAVES = [];
+function genWaves() {
+  WAVES.length = 0;
+  const pool = [
+    { t: "r", cost: 1,  gap: 0.7,  min: 1 },
+    { t: "a", cost: 1,  gap: 0.35, min: 2 },
+    { t: "k", cost: 2,  gap: 0.7,  min: 2 },
+    { t: "o", cost: 5,  gap: 0.9,  min: 3 },
+    { t: "Z", cost: 8,  gap: 1.0,  min: 5 },
+    { t: "T", cost: 16, gap: 1.5,  min: 7 },
+  ];
+  for (let w = 1; w <= 10; w++) {
+    const budget = (w === 10 ? 55 : 8 * Math.pow(1.5, w - 1)) * (0.85 + rnd() * 0.3);
+    const avail = pool.filter(p => w >= p.min);
+    const nTypes = Math.min(avail.length, w < 3 ? ri(1, 2) : ri(2, 3));
+    const chosen = [];
+    let guard = 0;
+    while (chosen.length < nTypes && guard++ < 50) {
+      const p = avail[ri(0, avail.length - 1)];
+      if (!chosen.includes(p)) chosen.push(p);
+    }
+    const groups = chosen.map(p => ({
+      t: p.t, n: Math.max(1, Math.round(budget / nTypes / p.cost)), gap: p.gap,
+    }));
+    if (w === 10) groups.push({ t: "D", n: 1, gap: 1 });
+    WAVES.push(groups);
+  }
+}
 const waveHpScale = (w) => 1 + 0.22 * (w - 1);
+
+// generate the first dungeon now (title screen shows it); resetGame
+// reuses it for the first game, then regenerates for every game after
+let levelFresh = true;
+genLevel();
+genWaves();
 
 /* ---------- game state ---------- */
 const G = {
@@ -236,6 +330,7 @@ const G = {
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, help: false, paused: false,
+  inv: { scroll: 0, potion: 0, wand: 0 }, hasteUntil: 0, seed: 0,
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0,
   time: 0,
 };
@@ -245,6 +340,10 @@ function towerAt(x, y) { return G.towers.find(t => t.x === x && t.y === y); }
 function message(s) { G.msg = s; G.msgAge = 0; }
 
 function resetGame() {
+  if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
+  else { genLevel(); genWaves(); }         // every later game is a new one
+  G.seed = SEED;
+  G.inv = { scroll: 0, potion: 0, wand: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
   G.score = 0; G.kills = 0;
   G.towers = []; G.creeps = []; G.fx = []; G.floats = [];
@@ -275,10 +374,11 @@ function startWave() {
 
 function spawnCreep(type) {
   const m = MONSTERS[type];
+  const scale = m.boss ? 1 : waveHpScale(G.wave);   // boss HP is flat
   G.creeps.push({
     type, prog: 0,
-    hp: Math.round(m.hp * waveHpScale(G.wave)),
-    maxHp: Math.round(m.hp * waveHpScale(G.wave)),
+    hp: Math.round(m.hp * scale),
+    maxHp: Math.round(m.hp * scale),
     spd: m.spd, slowUntil: 0, hitFlash: 0,
   });
 }
@@ -327,8 +427,55 @@ function damageCreep(c, dmg) {
     G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
     const [x, y] = creepCell(c);
     G.floats.push({ x, y, s: "+" + m.bounty + "$", ttl: 0.9, fg: "#e8e850" });
+    if (!m.boss && rnd() < 0.08) dropItem(x, y);
     if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph!");
   }
+}
+
+/* ---------- items (random drops from kills) ---------- */
+function dropItem(x, y) {
+  const roll = rnd();
+  if (roll < 0.4) {
+    const g = 5 + G.wave * 2;
+    G.gold += g;
+    G.floats.push({ x, y, s: "$" + g, ttl: 1.0, fg: "#e8e850" });
+    message("You find a small pile of zorkmids! (+" + g + ")");
+  } else if (roll < 0.65) {
+    G.inv.scroll++;
+    message("You find a scroll labeled ELBIB YLOH!  [r]ead it for fiery doom.");
+  } else if (roll < 0.85) {
+    G.inv.potion++;
+    message("You find a fizzy potion!  [q]uaff to hasten your towers.");
+  } else {
+    G.inv.wand++;
+    message("You find a wand of cold!  [z]ap it to chill every monster.");
+  }
+}
+function useScroll() {
+  if (G.inv.scroll < 1) { message("You have no scrolls to read."); return; }
+  G.inv.scroll--;
+  for (const c of [...G.creeps]) {
+    if (c.dead) continue;
+    const [x, y] = creepCell(c);
+    splashFx(x, y, "#ff8850");
+    damageCreep(c, 45);
+  }
+  message("You read the scroll.  A pillar of flame scours the dungeon!");
+}
+function usePotion() {
+  if (G.inv.potion < 1) { message("You have no potions to quaff."); return; }
+  G.inv.potion--;
+  G.hasteUntil = G.time + 8;
+  message("Gulp.  Your towers hum with supernatural speed! (8s)");
+}
+function useWand() {
+  if (G.inv.wand < 1) { message("You have no wands to zap."); return; }
+  G.inv.wand--;
+  for (const c of G.creeps) {
+    if (c.dead) continue;
+    c.slowUntil = G.time + 4; c.slowFactor = 0.4;
+  }
+  message("You zap the wand of cold.  Every monster shivers and slows!");
 }
 function beamFx(x1, y1, x2, y2, fg) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -347,6 +494,7 @@ function splashFx(x, y, fg) {
 }
 
 function updateTowers(dt) {
+  const hasteMul = G.time < G.hasteUntil ? 0.5 : 1;   // potion of haste
   for (const t of G.towers) {
     t.cd -= dt;
     if (t.cd > 0) continue;
@@ -359,7 +507,7 @@ function updateTowers(dt) {
       if (victims.length) {
         for (const c of victims) damageCreep(c, dmg);
         splashFx(t.x, t.y, spec.fg);
-        t.cd = spec.cd;
+        t.cd = spec.cd * hasteMul;
       }
       continue;
     }
@@ -379,7 +527,7 @@ function updateTowers(dt) {
       if (hit) {
         const [x, y] = creepCell(targets[0]);
         beamFx(t.x, t.y, x, y, spec.fg);
-        t.cd = spec.cd;
+        t.cd = spec.cd * hasteMul;
       }
     } else if (spec.kind === "splash") {
       const c0 = targets[0];
@@ -390,12 +538,12 @@ function updateTowers(dt) {
         if (Math.hypot(x - cx, y - cy) <= spec.splash) damageCreep(c, dmg);
       }
       splashFx(cx, cy, spec.fg);
-      t.cd = spec.cd;
+      t.cd = spec.cd * hasteMul;
     } else { // bolt
       damageCreep(targets[0], dmg);
       const [x, y] = creepCell(targets[0]);
       beamFx(t.x, t.y, x, y, spec.fg);
-      t.cd = spec.cd;
+      t.cd = spec.cd * hasteMul;
     }
   }
 }
@@ -511,7 +659,8 @@ function drawGame() {
 
   // status lines
   const spd = G.speed > 1 ? "  x" + G.speed : "";
-  const auto = G.autoStart ? "  [auto]" : "";
+  const auto = (G.autoStart ? "  [auto]" : "") +
+               (G.time < G.hasteUntil ? "  [haste]" : "");
   text(0, 22,
     ("Dlvl:1  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
      G.wave + "/" + WAVES.length + "  Kills:" + G.kills + "  Score:" + G.score +
@@ -532,6 +681,11 @@ function drawGame() {
     l2 = Object.entries(TOWERS).map(([k, s]) =>
       (+k === G.selType ? ">" : " ") + k + ":" + s.ch + " $" + s.cost
     ).join(" ") + "   SPACE:wave  ?:help";
+    const inv = [];
+    if (G.inv.scroll) inv.push("?x" + G.inv.scroll);
+    if (G.inv.potion) inv.push("!x" + G.inv.potion);
+    if (G.inv.wand) inv.push("/x" + G.inv.wand);
+    if (inv.length) l2 += "  " + inv.join(" ");
     // hovered monster info
     if (hy >= 0 && hy < MAPH) {
       const c = G.creeps.find(c => {
@@ -550,12 +704,11 @@ function drawCentered(lines, y0, fg) {
   lines.forEach((s, i) => text(Math.floor((COLS - s.length) / 2), y0 + i, s, fg));
 }
 function drawHelp() {
-  const x0 = 8, y0 = 3, w = 64, h = 17;
+  const x0 = 8, y0 = 2, w = 64, h = 20;
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
     put(x, y, " ", "#4a7a4a", "#0a120a");
   const lines = [
     "--------------------- YATD Help ---------------------",
-    "",
     "Monsters march from < to >.  Each leak costs you HP.",
     "",
     "TOWERS (select 1-4, click a floor tile . to build):",
@@ -564,10 +717,12 @@ function drawHelp() {
     " 3 F Frost Fountain    $20  chills & slows monsters",
     " 4 ^ Fire Trap         $15  place ON the corridor #",
     "",
-    "KEYS:  SPACE start wave    u upgrade   s sell",
-    "       hjkl/arrows cursor  ENTER build/select",
-    "       p pause/think        a auto-start  + - speed",
-    "       R restart  ? close",
+    "ITEMS (monsters sometimes drop them):",
+    " r read ? scroll of fireball    q quaff ! haste potion",
+    " z zap / wand of cold (chills every monster)",
+    "",
+    "KEYS: SPACE wave  p pause  u upgrade  s sell  a auto",
+    "      hjkl/arrows+ENTER cursor  + - speed  R restart",
     "",
     "MONSTERS: r rat  k kobold  a ant  o orc  Z zombie",
     "          T troll (regenerates!)  D dragon (boss)",
@@ -592,7 +747,7 @@ function drawTitle() {
   drawCentered(["a NetHack-flavored dungeon defense"], 13, "#6a8a6a");
   if (Math.floor(G.time * 1.5) % 2 === 0)
     drawCentered(["-- press any key to descend --"], 17, "#e8e850");
-  drawCentered(["v1.0  |  ? in game for help"], 20, "#3a5a3a");
+  drawCentered(["dungeon seed " + SEED + "  |  every game is a new dungeon"], 20, "#3a5a3a");
 }
 function drawWon() {
   drawGame();
@@ -691,6 +846,9 @@ window.addEventListener("keydown", (e) => {
       message("Game speed x" + G.speed); return;
     case "u": if (G.selTower) { upgradeTower(G.selTower); return; } break;
     case "s": if (G.selTower) { sellTower(G.selTower); return; } break;
+    case "r": useScroll(); return;
+    case "q": usePotion(); return;
+    case "z": useWand(); return;
     case "R": resetGame(); return;
     case "Escape": G.selTower = null; return;
     case "Enter":
