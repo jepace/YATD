@@ -47,7 +47,12 @@ The `<script>` is organized top-to-bottom in sections (marked with
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
    `?` scroll of fireball (`r`, 45 dmg to all), `!` potion of haste
    (`q`, towers 2× rate 8s via `G.hasteUntil`), `/` wand of cold
-   (`z`, slow all 4s). Inventory in `G.inv`, shown on status line.
+   (`z`, slow all 4s). Inventory in `G.inv`; view with the `i` overlay
+   (`drawInventory`). All game events go through `message(s)`, which
+   both sets the message line and appends to `G.log` (viewed via the
+   `log` overlay, `Ctrl-P`, NetHack-style). There is no floating combat
+   text — kills, drops, leaks etc. are all reported as messages, not
+   `G.fx`-style popups.
 
 4. **Game state** — the global `G` object (also `window.G` for tests).
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
@@ -58,20 +63,37 @@ The `<script>` is organized top-to-bottom in sections (marked with
 
 5. **Combat** — `updateTowers(dt)` handles all four tower kinds (`bolt`,
    `splash`, `slow`, `trap`); targeting is "furthest along path in
-   Euclidean range". `damageCreep()` handles death, bounty, floats.
-   Visuals are `G.fx` (short-lived beam/splash glyph overlays) and
-   `G.floats` (rising `+3$` texts).
+   Euclidean range". `damageCreep()` handles death, bounty, and messages.
+   Visuals are `G.fx` only (short-lived beam/splash glyph overlays) — no
+   floating combat text; all of that is `message()` calls now.
 
 6. **Rendering** — `drawGame()` rebuilds the whole cell buffer every
    frame: map → range highlight → towers → creeps → fx → cursor →
-   message/status lines → optional help overlay. Title/won/lost have their
-   own draw functions. Full redraw is cheap; don't add dirty-tracking.
+   message/status lines → optional overlay. Exactly one of three overlays
+   can be open at a time via `G.overlay` (`null | "help" | "inv" | "log"`),
+   drawn last so it sits on top: `drawHelp()`, `drawInventory()`,
+   `drawLog()`, all built on the shared `overlayBox(x0,y0,w,h,title)`
+   helper. Keep every overlay's box within rows 1–20 (rows 22–23 are the
+   status bar; row 21 is the last map row — don't let `y0 + h` reach 22 or
+   you'll paint over the status text drawn earlier that frame). Title/won/
+   lost have their own draw functions. Full redraw is cheap; don't add
+   dirty-tracking.
 
 7. **Input** — mouse (hover + click) and keyboard (vi-keys cursor,
    hotkeys) both funnel into `activate(x, y)`. Add new hotkeys in the
    single `keydown` switch. Note: `u` upgrades a selected tower but falls
    through to nothing otherwise; `h j k l b n y` are cursor movement, so
-   avoid reusing those letters.
+   avoid reusing those letters. `?`, `i`, and `Ctrl-P` toggle the three
+   overlays (see above) from anywhere and are checked before the overlay
+   swallows other keys — add new overlay-toggle keys next to them, not
+   inside the `switch`. Tower placement is intentionally NOT sticky:
+   `G.selType` (the readied tower, 0 = none) is cleared by `activate()`
+   after every successful `buildTower()`, so the player must press 1–4
+   again before each placement — this prevents accidental multi-builds
+   when clicking around or moving the keyboard cursor. `SPACE` is
+   contextual: `startWave()` while `G.state === "build"`, otherwise
+   toggles `G.paused`. Bindings intentionally mirror NetHack where one
+   exists (`r`ead, `q`uaff, `z`ap, `i`nventory, `Ctrl-P` message log).
 
 8. **Main loop** — fixed-timestep (`STEP = 1/60`) accumulator inside
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put

@@ -27,8 +27,8 @@ dungeon (the seed is shown on the title screen).
 Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of
 fireball (`r`ead one to scour every monster with flame), `!` potions of
 haste (`q`uaff to double your towers' speed for 8s), and `/` wands of
-cold (`z`ap to slow everything on the level). Your inventory shows on
-the bottom status line.
+cold (`z`ap to slow everything on the level). Press `i` to check your
+pack.
 
 ## Towers
 
@@ -49,11 +49,22 @@ Towers can be enchanted twice (`u`) for more damage and range, or sold
 
 ## Controls
 
-- **Mouse** — hover to preview range, click a floor tile `.` to build the
-  selected tower, click a tower to inspect/upgrade/sell.
-- `1`–`4` select tower type · `SPACE` start wave · `u` upgrade · `s` sell
-- `hjkl`/arrows + `ENTER` — full keyboard play, roguelike style
-- `r` read scroll · `q` quaff potion · `z` zap wand
-- `p` pause · `a` auto-start waves · `+`/`-` game speed · `?` help · `R` restart
+Bindings follow NetHack conventions wherever one exists.
+
+- **Mouse** — hover to preview range, click a tower type in the status
+  line's tool prompt (or press its number), then click a floor tile `.`
+  to build it. Click an existing tower to inspect/upgrade/sell it.
+- `1`–`4` ready a tower type — **you must press the number again before
+  each placement**, so clicking around never drops a second tower by
+  accident.
+- `hjkl`/`yubn`/arrows move a keyboard cursor, `ENTER` builds/selects —
+  full keyboard play, no mouse required.
+- `SPACE` — starts the wave while building; pauses/resumes time once a
+  wave is underway.
+- `r` read scroll · `q` quaff potion · `z` zap wand · `i` inventory
+- `u` upgrade selected tower · `s` sell selected tower
+- `Ctrl-P` message log (like NetHack's `^P`) · `?` help · `Escape` closes
+  overlays/deselects
+- `a` auto-start waves · `+`/`-` game speed · `R` restart
 
 Good luck. The dungeon is counting on you.

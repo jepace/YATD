@@ -4,11 +4,17 @@ Ideas from the original build session, roughly ordered by
 bang-for-the-buck. Each should keep the one-file, zero-dependency,
 NetHack-voiced constraints described in `CLAUDE.md`.
 
-**Already shipped since v1:** pause (`p`), procedural dungeon generation
+**Already shipped since v1:** pause (now `SPACE` while a wave is running;
+starts the wave when in build phase), procedural dungeon generation
 (seeded, `?seed=N`), randomized wave composition (`genWaves` budget
-system), and random item drops (scroll of fireball / potion of haste /
-wand of cold / gold piles). New item ideas should extend `dropItem()`
-and the `G.inv` + `r/q/z` key pattern.
+system), random item drops (scroll of fireball / potion of haste / wand
+of cold / gold piles) with an `i` inventory overlay, a `Ctrl-P` message
+log (NetHack-style — replaced the old floating "+2$" combat text
+entirely; all events are `message()` calls now), and non-sticky tower
+placement (`1`-`4` must be pressed again before each build). New item
+ideas should extend `dropItem()` and the `G.inv` + `r/q/z` key pattern.
+New overlays should follow the `G.overlay` + `overlayBox()` pattern in
+`drawHelp`/`drawInventory`/`drawLog` — see `CLAUDE.md` section 6.
 
 ## High value, moderate effort
 

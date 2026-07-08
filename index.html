@@ -324,20 +324,24 @@ const G = {
   state: "title",          // title | build | wave | won | lost
   gold: 40, hp: 20, maxHp: 20,
   wave: 0, score: 0, kills: 0,
-  towers: [], creeps: [], fx: [], floats: [],
+  towers: [], creeps: [], fx: [],
   spawnQueue: [], spawnTimer: 0,
-  selType: 1, selTower: null,
+  selType: 0, selTower: null,          // 0 = no tool readied
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
-  speed: 1, autoStart: false, help: false, paused: false,
+  speed: 1, autoStart: false, overlay: null, paused: false,
   inv: { scroll: 0, potion: 0, wand: 0 }, hasteUntil: 0, seed: 0,
-  msg: "Welcome to YATD!  Press ? for help.", msgAge: 0,
+  msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
 };
 window.G = G; // test hook
 
 function towerAt(x, y) { return G.towers.find(t => t.x === x && t.y === y); }
-function message(s) { G.msg = s; G.msgAge = 0; }
+function message(s) {
+  G.msg = s; G.msgAge = 0;
+  G.log.push(s);
+  if (G.log.length > 300) G.log.shift();
+}
 
 function resetGame() {
   if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
@@ -346,9 +350,9 @@ function resetGame() {
   G.inv = { scroll: 0, potion: 0, wand: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
   G.score = 0; G.kills = 0;
-  G.towers = []; G.creeps = []; G.fx = []; G.floats = [];
-  G.spawnQueue = []; G.selTower = null; G.selType = 1;
-  G.speed = 1; G.autoStart = false; G.help = false; G.paused = false;
+  G.towers = []; G.creeps = []; G.fx = []; G.log = [];
+  G.spawnQueue = []; G.selTower = null; G.selType = 0;
+  G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false;
   message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
 }
 
@@ -425,20 +429,18 @@ function damageCreep(c, dmg) {
     c.dead = true;
     const m = MONSTERS[c.type];
     G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
-    const [x, y] = creepCell(c);
-    G.floats.push({ x, y, s: "+" + m.bounty + "$", ttl: 0.9, fg: "#e8e850" });
-    if (!m.boss && rnd() < 0.08) dropItem(x, y);
-    if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph!");
+    if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph! (+" + m.bounty + " zorkmids)");
+    else message("The " + m.name + " is destroyed. (+" + m.bounty + " zorkmids)");
+    if (!m.boss && rnd() < 0.08) dropItem();
   }
 }
 
 /* ---------- items (random drops from kills) ---------- */
-function dropItem(x, y) {
+function dropItem() {
   const roll = rnd();
   if (roll < 0.4) {
     const g = 5 + G.wave * 2;
     G.gold += g;
-    G.floats.push({ x, y, s: "$" + g, ttl: 1.0, fg: "#e8e850" });
     message("You find a small pile of zorkmids! (+" + g + ")");
   } else if (roll < 0.65) {
     G.inv.scroll++;
@@ -573,8 +575,6 @@ function update(dt) {
   G.msgAge += dt;
   for (const f of G.fx) f.ttl -= dt;
   G.fx = G.fx.filter(f => f.ttl > 0);
-  for (const f of G.floats) f.ttl -= dt;
-  G.floats = G.floats.filter(f => f.ttl > 0);
 
   if (G.state !== "wave") return;
 
@@ -625,7 +625,7 @@ function drawGame() {
   const hy = G.cursor.on ? G.cursor.y : G.hover.y;
   if (G.selTower) {
     drawRange(G.selTower.x, G.selTower.y, towerRange(G.selTower), "#12241a");
-  } else if (hy >= 0 && hy < MAPH) {
+  } else if (G.selType && hy >= 0 && hy < MAPH) {
     const spec = TOWERS[G.selType];
     const ok = spec.kind === "trap" ? trapPlaceable(hx, hy) : buildable(hx, hy);
     if (ok) drawRange(hx, hy, spec.range, "#12241a");
@@ -645,7 +645,6 @@ function drawGame() {
   for (const f of G.fx)
     for (const [x, y] of f.cells)
       if (y >= 0 && y < MAPH && map[y][x] !== " ") put(x, MAPY + y, f.ch, f.fg);
-  for (const f of G.floats) text(f.x, MAPY + f.y, f.s, f.fg);
 
   // keyboard cursor
   if (G.cursor.on) {
@@ -670,6 +669,9 @@ function drawGame() {
     text(COLS - paused.length, 22, paused, "#ffe850");
   }
 
+  const spaceHint = G.state === "wave"
+    ? (G.paused ? "SPACE:resume" : "SPACE:pause")
+    : "SPACE:start wave";
   let l2;
   if (G.selTower) {
     const t = G.selTower, spec = TOWERS[t.type];
@@ -678,14 +680,10 @@ function drawGame() {
       (t.lvl < MAX_LVL ? "  [u]pgrade $" + upgradeCost(t) : "  (max)") +
       "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC:deselect";
   } else {
-    l2 = Object.entries(TOWERS).map(([k, s]) =>
-      (+k === G.selType ? ">" : " ") + k + ":" + s.ch + " $" + s.cost
-    ).join(" ") + "   SPACE:wave  ?:help";
-    const inv = [];
-    if (G.inv.scroll) inv.push("?x" + G.inv.scroll);
-    if (G.inv.potion) inv.push("!x" + G.inv.potion);
-    if (G.inv.wand) inv.push("/x" + G.inv.wand);
-    if (inv.length) l2 += "  " + inv.join(" ");
+    l2 = G.selType
+      ? "Readied: " + TOWERS[G.selType].ch + " " + TOWERS[G.selType].name + "  place it!"
+      : "1:W$10 2:%$25 3:F$20 4:^$15 (ready a tower)";
+    l2 += "  " + spaceHint + " i:inv ?:help";
     // hovered monster info
     if (hy >= 0 && hy < MAPH) {
       const c = G.creeps.find(c => {
@@ -697,37 +695,76 @@ function drawGame() {
   }
   text(0, 23, l2.padEnd(COLS).slice(0, COLS), "#8aa87a");
 
-  if (G.help) drawHelp();
+  if (G.overlay === "help") drawHelp();
+  else if (G.overlay === "inv") drawInventory();
+  else if (G.overlay === "log") drawLog();
 }
 
 function drawCentered(lines, y0, fg) {
   lines.forEach((s, i) => text(Math.floor((COLS - s.length) / 2), y0 + i, s, fg));
 }
-function drawHelp() {
-  const x0 = 8, y0 = 2, w = 64, h = 20;
+function overlayBox(x0, y0, w, h, title) {
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
     put(x, y, " ", "#4a7a4a", "#0a120a");
+  if (title) text(x0 + 2, y0, title, "#e8e850");
+}
+function drawHelp() {
+  const x0 = 8, y0 = 1, w = 64, h = 20;
+  overlayBox(x0, y0, w, h);
   const lines = [
     "--------------------- YATD Help ---------------------",
     "Monsters march from < to >.  Each leak costs you HP.",
     "",
-    "TOWERS (select 1-4, click a floor tile . to build):",
+    "TOWERS -- press 1-4 to ready one, then click or ENTER a",
+    "tile to build it.  You must press the number again before",
+    "each new placement (no accidental double-builds).",
     " 1 W Wand of Striking  $10  fast single-target bolts",
     " 2 % Acid Blob         $25  splash damage",
     " 3 F Frost Fountain    $20  chills & slows monsters",
     " 4 ^ Fire Trap         $15  place ON the corridor #",
     "",
-    "ITEMS (monsters sometimes drop them):",
-    " r read ? scroll of fireball    q quaff ! haste potion",
-    " z zap / wand of cold (chills every monster)",
+    "ITEMS: r read ? scroll of fireball   q quaff ! haste potion",
+    "       z zap / wand of cold          i show inventory",
     "",
-    "KEYS: SPACE wave  p pause  u upgrade  s sell  a auto",
-    "      hjkl/arrows+ENTER cursor  + - speed  R restart",
+    "KEYS: SPACE start wave / pause time   u upgrade   s sell",
+    "      hjkl/arrows+ENTER cursor        + - speed   a auto",
+    "      Ctrl-P message log              R restart",
     "",
     "MONSTERS: r rat  k kobold  a ant  o orc  Z zombie",
     "          T troll (regenerates!)  D dragon (boss)",
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
+}
+function drawInventory() {
+  const x0 = 14, y0 = 6, w = 52, h = 11;
+  overlayBox(x0, y0, w, h);
+  const rows = [
+    ["?", "scroll of fireball", G.inv.scroll, "r read"],
+    ["!", "potion of haste",    G.inv.potion, "q quaff"],
+    ["/", "wand of cold",       G.inv.wand,   "z zap"],
+  ];
+  text(x0 + 2, y0, "----------------- Inventory -----------------", "#e8e850");
+  let row = y0 + 2;
+  const carried = rows.filter(r => r[2] > 0);
+  if (!carried.length) {
+    text(x0 + 2, row, "You are not carrying anything.", "#8aa87a");
+  } else {
+    for (const [ch, name, n, use] of carried) {
+      text(x0 + 2, row, ch + " - " + name + " (x" + n + ")", "#c8e8b8");
+      text(x0 + 2, row + 1, "    " + use, "#6a8a6a");
+      row += 2;
+    }
+  }
+  text(x0 + 2, y0 + h - 2, "i or ESC to close", "#6a8a6a");
+}
+function drawLog() {
+  const x0 = 4, y0 = 1, w = 72, h = 20;
+  overlayBox(x0, y0, w, h);
+  text(x0 + 2, y0, "----------------- Message Log -----------------", "#e8e850");
+  const rows = h - 4;
+  const lines = G.log.slice(-rows);
+  lines.forEach((s, i) => text(x0 + 2, y0 + 2 + i, s.slice(0, w - 4), "#9ac88a"));
+  text(x0 + 2, y0 + h - 1, "Ctrl-P or ESC to close", "#6a8a6a");
 }
 
 function drawTitle() {
@@ -807,11 +844,12 @@ canvas.addEventListener("mousedown", (e) => {
   activate(x, y);
 });
 function activate(x, y) {
-  if (G.help) { G.help = false; return; }
+  if (G.overlay) { G.overlay = null; return; }
   const t = towerAt(x, y);
   if (t) { G.selTower = t; return; }
   G.selTower = null;
-  buildTower(G.selType, x, y);
+  if (!G.selType) { message("Ready a tower first: press 1, 2, 3, or 4."); return; }
+  if (buildTower(G.selType, x, y)) G.selType = 0; // reselect before next placement
 }
 
 const DIRS = {
@@ -826,18 +864,30 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "r" || e.key === "R") resetGame();
     return;
   }
-  if (e.key === "?") { G.help = !G.help; return; }
-  if (G.help && e.key === "Escape") { G.help = false; return; }
+  // overlays (help / inventory / message log) toggle regardless of state,
+  // and swallow every other key while one is open
+  if (e.key === "?") { G.overlay = G.overlay === "help" ? null : "help"; return; }
+  if (e.key === "i") { G.overlay = G.overlay === "inv" ? null : "inv"; return; }
+  if (e.ctrlKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    G.overlay = G.overlay === "log" ? null : "log";
+    return;
+  }
+  if (G.overlay) { if (e.key === "Escape") G.overlay = null; return; }
 
   if (e.key >= "1" && e.key <= "4") {
     G.selType = +e.key; G.selTower = null;
-    message("Selected: " + TOWERS[G.selType].name + " ($" + TOWERS[G.selType].cost + ") — " + TOWERS[G.selType].desc);
+    message("Ready: " + TOWERS[G.selType].name + " ($" + TOWERS[G.selType].cost + ") — " + TOWERS[G.selType].desc);
     return;
   }
   switch (e.key) {
-    case " ": startWave(); return;
-    case "p": G.paused = !G.paused;
-      message(G.paused ? "Time stands still.  (p to resume)" : "Time flows once more."); return;
+    case " ":
+      if (G.state === "build") { startWave(); return; }
+      if (G.state === "wave") {
+        G.paused = !G.paused;
+        message(G.paused ? "Time stands still.  (SPACE to resume)" : "Time flows once more.");
+      }
+      return;
     case "a": G.autoStart = !G.autoStart;
       message("Auto-start waves: " + (G.autoStart ? "on" : "off")); return;
     case "+": case "=": G.speed = Math.min(4, G.speed * 2);
@@ -850,7 +900,7 @@ window.addEventListener("keydown", (e) => {
     case "q": usePotion(); return;
     case "z": useWand(); return;
     case "R": resetGame(); return;
-    case "Escape": G.selTower = null; return;
+    case "Escape": G.selTower = null; G.selType = 0; return;
     case "Enter":
       if (G.cursor.on) activate(G.cursor.x, G.cursor.y);
       return;
