@@ -235,7 +235,7 @@ const G = {
   selType: 1, selTower: null,
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
-  speed: 1, autoStart: false, help: false,
+  speed: 1, autoStart: false, help: false, paused: false,
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0,
   time: 0,
 };
@@ -249,7 +249,7 @@ function resetGame() {
   G.score = 0; G.kills = 0;
   G.towers = []; G.creeps = []; G.fx = []; G.floats = [];
   G.spawnQueue = []; G.selTower = null; G.selType = 1;
-  G.speed = 1; G.autoStart = false; G.help = false;
+  G.speed = 1; G.autoStart = false; G.help = false; G.paused = false;
   message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
 }
 
@@ -420,6 +420,7 @@ function updateCreeps(dt) {
 }
 
 function update(dt) {
+  if (G.paused) return;
   G.time += dt;
   G.msgAge += dt;
   for (const f of G.fx) f.ttl -= dt;
@@ -515,6 +516,10 @@ function drawGame() {
     ("Dlvl:1  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
      G.wave + "/" + WAVES.length + "  Kills:" + G.kills + "  Score:" + G.score +
      spd + auto).padEnd(COLS).slice(0, COLS), "#c8d8b8");
+  if (G.paused) {
+    const paused = "*** PAUSED ***";
+    text(COLS - paused.length, 22, paused, "#ffe850");
+  }
 
   let l2;
   if (G.selTower) {
@@ -561,7 +566,8 @@ function drawHelp() {
     "",
     "KEYS:  SPACE start wave    u upgrade   s sell",
     "       hjkl/arrows cursor  ENTER build/select",
-    "       a auto-start  + - speed  R restart  ? close",
+    "       p pause/think        a auto-start  + - speed",
+    "       R restart  ? close",
     "",
     "MONSTERS: r rat  k kobold  a ant  o orc  Z zombie",
     "          T troll (regenerates!)  D dragon (boss)",
@@ -675,6 +681,8 @@ window.addEventListener("keydown", (e) => {
   }
   switch (e.key) {
     case " ": startWave(); return;
+    case "p": G.paused = !G.paused;
+      message(G.paused ? "Time stands still.  (p to resume)" : "Time flows once more."); return;
     case "a": G.autoStart = !G.autoStart;
       message("Auto-start waves: " + (G.autoStart ? "on" : "off")); return;
     case "+": case "=": G.speed = Math.min(4, G.speed * 2);
