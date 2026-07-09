@@ -42,8 +42,13 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
   electric-immune. Each level's dragon is a random color with a
   matching immunity (`pickDragon()`, `DRAGON_COLORS`), so one tower type
   can no longer trivialize every boss fight.
-- **Wand of charging** (item, `c` to zap) — instantly maxes every
-  tower's charges/HP at once.
+- **Wand of charging** (item, `c` to zap) — restores `t.lvl` dice of
+  `d6` to every tower's charges/HP that's below max, deliberately not a
+  guaranteed full top-off (real NetHack precedent, and the broader
+  "nothing is perfect, everything is useful" design note above).
+  Applies to any tower with `spec.maxCharges` or `spec.hp` set, no
+  per-type special-casing, so wand of lightning benefits identically to
+  wand of striking.
 - A real **jitter/tower-occupancy bug fix** (a grounded creep's
   cosmetic lane-wobble could render it on top of an adjacent tower) and
   a **render fix** for flying creeps (which legitimately CAN share a

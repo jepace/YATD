@@ -35,8 +35,10 @@ Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of
 fireball (`r`ead one to scour every monster with fire), `!` potions of
 haste (`q`uaff to double your towers' speed for 8s), `/` wands of cold
 (`z`ap to slow everything on the level), and `/` wands of charging
-(`c`harge to instantly max out every tower's charges and HP at once).
-Press `i` to check your pack.
+(`c`harge to restore charges and HP to every wand and wall that needs
+it — like the real NetHack item, it's a dice roll, not a guaranteed
+top-off, and rolls better on your higher-level towers). Press `i` to
+check your pack.
 
 ## Towers
 

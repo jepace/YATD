@@ -85,11 +85,16 @@ The `<script>` is organized top-to-bottom in sections (marked with
    its new max. A depleted wand renders dimmed (`empty` check in the
    tower draw loop) and simply stops firing — `updateTowers` `continue`s
    past it without resetting `t.cd`, so it fires again the instant a
-   charge trickles back in. (Everything in this game is meant to ebb and
-   flow rather than being purely one-directional — wands drain and
-   recharge, walls take damage and can be repaired, monsters take damage
-   and passively regen — so if you add a new resource, default to giving
-   it both directions rather than a one-way meter.)
+   charge trickles back in. (Design note, direct from the user: nothing
+   should be perfect and everything should be useful. Concretely this
+   means resources ebb and flow rather than being purely one-directional
+   — wands drain and recharge, walls take damage and can be repaired,
+   monsters take damage and passively regen, recharging is a dice roll
+   not a guaranteed top-off — and no single tool should trivialize a
+   whole category of problem, which is also why dragon immunity exists.
+   If you add a new resource or consumable, default to giving it both
+   directions and some randomness/limitation rather than a clean one-way
+   or guaranteed effect.)
    `TOWERS[5]` (`kind: "chain"`) is a bolt that arcs: after damaging its
    primary target it looks for the nearest un-hit, non-submerged,
    LOS-visible creep within `chainRange` of the *previous* hit (not the
@@ -111,8 +116,13 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `?` scroll of fireball (`r`, 45 fire dmg to all — respects dragon fire
    immunity, see below), `!` potion of haste (`q`, towers 2× rate 8s via
    `G.hasteUntil`), `/` wand of cold (`z`, slow all 4s), `/` wand of
-   charging (`c`, instantly maxes every tower's `charges`/`hp`). Inventory
-   in `G.inv`; view with the `i` overlay (`drawInventory`). All game
+   charging (`c`, restores `t.lvl` dice of `d6` to every tower's
+   `charges`/`hp` that's below max — deliberately NOT a guaranteed
+   full top-off, in keeping with "nothing is perfect" — applies uniformly
+   to any tower with `spec.maxCharges` or `spec.hp` set, so the wand of
+   lightning benefits from it exactly like the wand of striking with no
+   special-casing needed). Inventory in `G.inv`; view with the `i`
+   overlay (`drawInventory`). All game
    events go through `message(s)`, which both sets the message line and
    appends to `G.log` (viewed via the `log` overlay, `Ctrl-P`,
    NetHack-style). There is no floating combat text — kills, drops, leaks

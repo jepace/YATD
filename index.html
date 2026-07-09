@@ -777,14 +777,27 @@ function useWand() {
 function useCharge() {
   if (G.inv.charge < 1) { message("You have no wands of charging."); return; }
   G.inv.charge--;
+  // like the real thing, this is not a guaranteed full recharge -- each
+  // tower gets its own roll (t.lvl dice of d6), so nothing is ever a sure
+  // top-off and a level-1 tower barely benefits compared to a level-4 one
   let restored = 0;
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
-    if (spec.maxCharges && t.charges < towerMaxCharges(t)) { t.charges = towerMaxCharges(t); restored++; }
-    if (spec.hp && t.hp < towerMaxHp(t)) { t.hp = towerMaxHp(t); restored++; }
+    if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
+      let roll = 0;
+      for (let i = 0; i < t.lvl; i++) roll += ri(1, 6);
+      t.charges = Math.min(towerMaxCharges(t), t.charges + roll);
+      restored++;
+    }
+    if (spec.hp && t.hp < towerMaxHp(t)) {
+      let roll = 0;
+      for (let i = 0; i < t.lvl; i++) roll += ri(1, 6);
+      t.hp = Math.min(towerMaxHp(t), t.hp + roll);
+      restored++;
+    }
   }
   message(restored
-    ? "You zap the wand of charging.  Your arsenal hums with restored power!"
+    ? "You zap the wand of charging.  Your arsenal crackles with renewed power!"
     : "You zap the wand of charging, but nothing here needed it.");
 }
 function beamFx(x1, y1, x2, y2, fg) {
