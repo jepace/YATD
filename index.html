@@ -360,33 +360,61 @@ const towerMaxHp = (t) => Math.round(TOWERS[t.type].hp * Math.pow(1.5, t.lvl - 1
 const WALL_DPS = 6;   // how fast an adjacent creep chips a dirt wall down
 const BASE_REGEN = 0.4;   // hp/sec -- every monster heals a little if left alone
 
-// `flies: true` ignores every blocking tower (only rock/walls stop it --
-// see G.flowFly/creepFlow) -- the counter to a turtled tower maze.
-// `splits`: on death, a chance to spawn a weaker copy of itself
-// (`child: true` on the spawned copy stops it from splitting again).
-// `submerges`: periodically untargetable by every damage source except
-// the fireball scroll (see isSubmerged()). `regen`: hp/sec passive heal,
-// overriding BASE_REGEN (which every monster gets by default) -- only
-// the troll sets this, to stay distinctly the "hard to finish off" one.
+// `ch` is the map glyph -- kept separate from the MONSTERS key so several
+// tiers can share one letter with a different name/color/stats, exactly
+// like real NetHack's monster classes (e.g. the canine class 'd' covers
+// jackal through warg). `flies: true` ignores every blocking tower (only
+// rock/walls stop it -- see G.flowFly/creepFlow) -- the counter to a
+// turtled tower maze. `splits`: on death, a chance to spawn a weaker copy
+// of itself (`child: true` on the spawned copy stops it from splitting
+// again). `submerges`: periodically untargetable by every damage source
+// except the fireball scroll (see isSubmerged()). `regen`: hp/sec passive
+// heal, overriding BASE_REGEN (which every monster gets by default).
 const MONSTERS = {
-  r: { name: "sewer rat", hp: 9,   spd: 3.4, bounty: 2,  leak: 1,  fg: "#b8825a" },
-  x: { name: "grid bug",  hp: 5,   spd: 3.6, bounty: 1,  leak: 1,  fg: "#c8c850" },
-  a: { name: "giant ant", hp: 8,   spd: 4.0, bounty: 1,  leak: 1,  fg: "#d0d050" },
-  b: { name: "cave bat",  hp: 10,  spd: 4.5, bounty: 3,  leak: 1,  fg: "#a050e8", flies: true },
-  k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
-  ";": { name: "giant eel", hp: 30, spd: 2.0, bounty: 5, leak: 2,  fg: "#50a8e8",
-         submerges: true, immuneTo: "electric" },
-  o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
-  "&": { name: "demon",   hp: 55,  spd: 1.7, bounty: 9,  leak: 2,  fg: "#e850e8",
-         splits: true, splitChance: 0.5, splitHpFrac: 0.4, immuneTo: "fire" },
-  Z: { name: "zombie",    hp: 85,  spd: 1.1, bounty: 8,  leak: 2,  fg: "#a8b8a8" },
-  T: { name: "troll",     hp: 150, spd: 1.6, bounty: 15, leak: 3,  fg: "#50b8b8", regen: 3 },
-  // D's name/fg/immuneTo are overwritten by pickDragon() at the start of
-  // every level -- see DRAGON_COLORS. There's only ever one dragon alive
-  // at a time (wave 10's lone boss), so mutating the shared entry is
+  rat:      { name: "sewer rat",     ch: "r", hp: 9,   spd: 3.4, bounty: 2,  leak: 1, fg: "#b8825a" },
+  gridbug:  { name: "grid bug",      ch: "x", hp: 5,   spd: 3.6, bounty: 1,  leak: 1, fg: "#c8c850" },
+  ant:      { name: "giant ant",     ch: "a", hp: 8,   spd: 4.0, bounty: 1,  leak: 1, fg: "#d0d050" },
+  jackal:   { name: "jackal",        ch: "d", hp: 12,  spd: 3.8, bounty: 2,  leak: 1, fg: "#c89858" },
+  bat:      { name: "cave bat",      ch: "b", hp: 10,  spd: 4.5, bounty: 3,  leak: 1, fg: "#a050e8", flies: true },
+  kobold:   { name: "kobold",        ch: "k", hp: 18,  spd: 2.2, bounty: 3,  leak: 1, fg: "#e85050" },
+
+  eel:      { name: "giant eel",     ch: ";", hp: 30,  spd: 2.0, bounty: 5,  leak: 2, fg: "#50a8e8",
+              submerges: true, immuneTo: "electric" },
+  orc:      { name: "orc",           ch: "o", hp: 42,  spd: 1.8, bounty: 5,  leak: 2, fg: "#e8a050" },
+  gnome:    { name: "gnome",         ch: "G", hp: 20,  spd: 2.6, bounty: 3,  leak: 1, fg: "#78c878" },
+  dwarf:    { name: "dwarf",         ch: "h", hp: 35,  spd: 2.0, bounty: 6,  leak: 2, fg: "#c8a850" },
+  lichen:   { name: "lichen",        ch: "F", hp: 15,  spd: 0.8, bounty: 2,  leak: 1, fg: "#68a868" },
+  spider:   { name: "giant spider",  ch: "s", hp: 22,  spd: 3.0, bounty: 4,  leak: 1, fg: "#8858c8" },
+
+  demon:    { name: "demon",         ch: "&", hp: 55,  spd: 1.7, bounty: 9,  leak: 2, fg: "#e850e8",
+              splits: true, splitChance: 0.5, splitHpFrac: 0.4, immuneTo: "fire" },
+  zombie:   { name: "zombie",        ch: "Z", hp: 85,  spd: 1.1, bounty: 8,  leak: 2, fg: "#a8b8a8" },
+  orcapt:   { name: "orc captain",   ch: "o", hp: 70,  spd: 1.9, bounty: 10, leak: 2, fg: "#c85050" },
+  wolf:     { name: "wolf",          ch: "d", hp: 45,  spd: 3.5, bounty: 7,  leak: 2, fg: "#8898a8" },
+  vbat:     { name: "vampire bat",   ch: "b", hp: 40,  spd: 5.0, bounty: 8,  leak: 2, fg: "#682858", flies: true },
+  homunc:   { name: "homunculus",    ch: "h", hp: 25,  spd: 2.4, bounty: 4,  leak: 1, fg: "#78a8a8" },
+
+  troll:    { name: "troll",         ch: "T", hp: 150, spd: 1.6, bounty: 15, leak: 3, fg: "#50b8b8", regen: 3 },
+  ogre:     { name: "ogre",          ch: "O", hp: 180, spd: 1.3, bounty: 18, leak: 3, fg: "#a87850" },
+  wraith:   { name: "wraith",        ch: "W", hp: 95,  spd: 2.0, bounty: 12, leak: 2, fg: "#c8c8e8", flies: true },
+  gspider:  { name: "giant spider",  ch: "s", hp: 60,  spd: 3.2, bounty: 10, leak: 2, fg: "#582888" },
+  warg:     { name: "warg",          ch: "d", hp: 90,  spd: 3.6, bounty: 14, leak: 3, fg: "#485868" },
+  hdevil:   { name: "horned devil",  ch: "&", hp: 130, spd: 2.0, bounty: 20, leak: 3, fg: "#a81828",
+              splits: true, splitChance: 0.35, splitHpFrac: 0.4, immuneTo: "fire" },
+
+  chieftain:{ name: "troll chieftain",ch: "T", hp: 260, spd: 1.7, bounty: 30, leak: 4, fg: "#a8f8f8", regen: 5 },
+  ghoul:    { name: "ghoul",         ch: "Z", hp: 150, spd: 1.4, bounty: 18, leak: 3, fg: "#586858", regen: 2 },
+  felem:    { name: "fire elemental",ch: "e", hp: 140, spd: 2.0, bounty: 22, leak: 3, fg: "#ff8030", immuneTo: "fire" },
+  kraken:   { name: "kraken",        ch: ";", hp: 220, spd: 1.8, bounty: 35, leak: 4, fg: "#2868a8",
+              submerges: true, immuneTo: "electric" },
+  lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2 },
+
+  // dragon's name/fg/immuneTo are overwritten by pickDragon() at the start
+  // of every level -- see DRAGON_COLORS. There's only ever one dragon
+  // alive at a time (wave 10's lone boss), so mutating the shared entry is
   // simpler than threading a per-creep override through every render/
   // message site that reads MONSTERS[c.type].
-  D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050",
+  D: { name: "red dragon", ch: "D", hp: 2200, spd: 0.9, bounty: 150, leak: 20, fg: "#ff5050",
        boss: true, immuneTo: "fire" },
 };
 // one is picked at random (seeded, so reproducible per dungeon) for each
@@ -409,25 +437,63 @@ function pickDragon() {
 // gets a point budget (growing ~1.5x per wave, +-15%, and ~1.3x per
 // Dlvl) spent on monster types that unlock as waves go on. Wave 10
 // always ends with the dragon.
+//
+// Each pool entry is gated on BOTH `min` (wave-within-the-level it can
+// first appear) and `minDlvl`/`maxDlvl` (which dungeon levels it's even
+// eligible on) -- the two axes are independent on purpose. `min` alone
+// used to mean a grid bug that's legal on wave 1 of Dlvl 1 was equally
+// legal on wave 1 of Dlvl 5, since every level restarts its wave counter
+// at 1; `maxDlvl` retires the trash tiers as depth increases (so a
+// weak monster's `min` only matters within the dlvl window it's still
+// eligible for) and `minDlvl` gates in the tougher tiers that would
+// trivialize an early level. Where two entries share a `ch` (e.g. the
+// canine tier jackal/wolf/warg, all `d`), that mirrors real NetHack
+// monster classes -- same glyph, different tier -- and Just Works since
+// rendering reads `MONSTERS[c.type].ch`, not the type key itself.
 const WAVES = [];
 function genWaves(dlvl) {
   WAVES.length = 0;
-  const dlvlMul = Math.pow(1.35, (dlvl || 1) - 1);
+  dlvl = dlvl || 1;
+  const dlvlMul = Math.pow(1.35, dlvl - 1);
   const pool = [
-    { t: "r", cost: 1,  gap: 0.7,  min: 1 },
-    { t: "x", cost: 1,  gap: 0.3,  min: 1 },
-    { t: "a", cost: 1,  gap: 0.35, min: 2 },
-    { t: "b", cost: 2,  gap: 0.5,  min: 2 },
-    { t: "k", cost: 2,  gap: 0.7,  min: 2 },
-    { t: "o", cost: 5,  gap: 0.9,  min: 3 },
-    { t: ";", cost: 4,  gap: 0.8,  min: 3 },
-    { t: "&", cost: 6,  gap: 1.0,  min: 4 },
-    { t: "Z", cost: 8,  gap: 1.0,  min: 5 },
-    { t: "T", cost: 16, gap: 1.5,  min: 7 },
+    { t: "rat",       cost: 1,  gap: 0.7, min: 1, minDlvl: 1, maxDlvl: 3 },
+    { t: "gridbug",   cost: 1,  gap: 0.3, min: 1, minDlvl: 1, maxDlvl: 2 },
+    { t: "ant",       cost: 1,  gap: 0.35,min: 2, minDlvl: 1, maxDlvl: 3 },
+    { t: "jackal",    cost: 1,  gap: 0.5, min: 1, minDlvl: 1 },
+    { t: "bat",       cost: 2,  gap: 0.5, min: 2, minDlvl: 1, maxDlvl: 4 },
+    { t: "kobold",    cost: 2,  gap: 0.7, min: 2, minDlvl: 1, maxDlvl: 3 },
+
+    { t: "eel",       cost: 4,  gap: 0.8, min: 3, minDlvl: 2, maxDlvl: 4 },
+    { t: "orc",       cost: 5,  gap: 0.9, min: 3, minDlvl: 2, maxDlvl: 4 },
+    { t: "gnome",     cost: 2,  gap: 0.4, min: 2, minDlvl: 2, maxDlvl: 3 },
+    { t: "dwarf",     cost: 4,  gap: 0.8, min: 3, minDlvl: 2, maxDlvl: 4 },
+    { t: "lichen",    cost: 2,  gap: 0.6, min: 2, minDlvl: 2, maxDlvl: 3 },
+    { t: "spider",    cost: 3,  gap: 0.6, min: 3, minDlvl: 2, maxDlvl: 3 },
+
+    { t: "demon",     cost: 6,  gap: 1.0, min: 4, minDlvl: 3 },
+    { t: "zombie",    cost: 8,  gap: 1.0, min: 5, minDlvl: 3, maxDlvl: 4 },
+    { t: "orcapt",    cost: 8,  gap: 1.1, min: 5, minDlvl: 3 },
+    { t: "wolf",      cost: 6,  gap: 0.7, min: 3, minDlvl: 3, maxDlvl: 4 },
+    { t: "vbat",      cost: 7,  gap: 0.6, min: 4, minDlvl: 3 },
+    { t: "homunc",    cost: 3,  gap: 0.5, min: 2, minDlvl: 3, maxDlvl: 4 },
+
+    { t: "troll",     cost: 16, gap: 1.5, min: 7, minDlvl: 4, maxDlvl: 4 },
+    { t: "ogre",      cost: 18, gap: 1.6, min: 6, minDlvl: 4 },
+    { t: "wraith",    cost: 11, gap: 1.2, min: 5, minDlvl: 4 },
+    { t: "gspider",   cost: 8,  gap: 0.9, min: 5, minDlvl: 4 },
+    { t: "warg",      cost: 10, gap: 0.8, min: 5, minDlvl: 4 },
+    { t: "hdevil",    cost: 14, gap: 1.3, min: 6, minDlvl: 4 },
+
+    { t: "chieftain", cost: 30, gap: 1.8, min: 7, minDlvl: 5 },
+    { t: "ghoul",     cost: 16, gap: 1.4, min: 6, minDlvl: 5 },
+    { t: "felem",     cost: 20, gap: 1.5, min: 6, minDlvl: 5 },
+    { t: "kraken",    cost: 30, gap: 1.8, min: 7, minDlvl: 5 },
+    { t: "lich",      cost: 24, gap: 1.6, min: 7, minDlvl: 5 },
   ];
   for (let w = 1; w <= 10; w++) {
     const budget = (w === 10 ? 55 : 8 * Math.pow(1.5, w - 1)) * dlvlMul * (0.85 + rnd() * 0.3);
-    const avail = pool.filter(p => w >= p.min);
+    const avail = pool.filter(p =>
+      w >= p.min && dlvl >= (p.minDlvl || 1) && dlvl <= (p.maxDlvl || Infinity));
     const nTypes = Math.min(avail.length, w < 3 ? ri(1, 2) : ri(2, 3));
     const chosen = [];
     let guard = 0;
@@ -1075,7 +1141,7 @@ function drawGame() {
     // flying creeps ignore blocking towers and can share a tower's cell --
     // tint the background so it reads as "flying over", not "on top of"
     const bg = m.flies && towerAt(x, y) ? "#241a30" : undefined;
-    put(x, MAPY + y, c.type, fg, bg);
+    put(x, MAPY + y, m.ch, fg, bg);
   }
   for (const f of G.fx)
     for (const [x, y] of f.cells)
@@ -1197,9 +1263,10 @@ function drawHelp() {
     "KEYS: SPACE wave/pause  a auto  Ctrl-P log  R restart",
     "      hjkl/arrows+ENTER cursor  + - speed",
     "",
-    "MONSTERS: r rat  x bug  a ant  b bat(flies!)  k kobold",
-    "  ; eel(submerges!)  o orc  & demon(splits!)  Z zombie",
-    "  T troll(regen!)  D dragon(boss)",
+    "~30 monsters, phasing in/out by dungeon level. Some fly",
+    "over towers, submerge, split on death, or regen fast --",
+    "same letter can mean a tougher tier deeper down. D is",
+    "always the wave-10 boss.",
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }

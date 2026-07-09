@@ -47,15 +47,42 @@ The `<script>` is organized top-to-bottom in sections (marked with
 
 3. **Data tables** — `TOWERS` (1–6, keyed by hotkey; glyphs are always
    NetHack object-class punctuation — `/` `0` `{` `^` `\` `%` — never a
-   letter, since letters are reserved for monsters), `MONSTERS` (keyed by
-   their map glyph: `r x a b k ; o & Z T D`). Monster flags that interact
-   with the pathfinding/combat systems: `flies: true` (bat) makes a
+   letter, since letters are reserved for monsters), `MONSTERS` (~30
+   entries, keyed by a descriptive id string — `rat`, `jackal`, `troll`,
+   etc — NOT by glyph; each entry carries its own `ch`, decoupled from
+   the key precisely so several tiers can share one letter with a
+   different name/color/stats, the same way real NetHack's monster
+   classes work — e.g. the canine class `d` covers `jackal` → `wolf` →
+   `warg` as the dungeon gets deeper, `o` covers `orc` → `orcapt`, `T`
+   covers `troll` → `chieftain`, `&` covers `demon` → `hdevil`. Rendering
+   always reads `MONSTERS[c.type].ch`, never the type key itself, so
+   adding a same-glyph tier needs zero changes outside the table). Each
+   `genWaves(dlvl)` pool entry is gated on two independent axes: `min`
+   (which wave *within* the level unlocks it, unchanged from before) and
+   `minDlvl`/`maxDlvl` (which dungeon levels it's eligible on at all) —
+   without the second axis, a trash-tier monster legal on wave 1 of Dlvl
+   1 was equally legal on wave 1 of Dlvl 5, since every level restarts
+   its own wave counter at 1. Grid bugs, for instance, cap out at
+   `maxDlvl: 2` so they're gone by Dlvl 3; heavier tiers (`chieftain`,
+   `kraken`, `lich`, …) carry `minDlvl: 5` so they can't show up early
+   and trivialize nothing. **If you add or re-tier a pool entry, keep at
+   least one `min: 1` entry uncapped (or capped no lower than `maxDlvl:
+   5`)** — `jackal` is that safety net today — because the filter is
+   `w >= min && dlvl >= minDlvl && dlvl <= maxDlvl`, and if wave 1 of some
+   dlvl ever has zero eligible entries `genWaves` produces an empty
+   group for that wave (no crash, just a wave with nothing in it) — the
+   `genwaves_test.js`/`flow8_unit_test.js` scratch tests specifically
+   assert this never happens across all 50 (dlvl, wave) combinations.
+   Monster flags that interact with the pathfinding/combat systems (each
+   now spread across 2–4 monsters at different tiers for run-to-run
+   variety, not just one signature monster apiece): `flies: true` (bat,
+   vampire bat, wraith) makes a
    creep use `G.flowFly` instead of `G.flow` — see the pathfinding note
    below, this is the counter to a turtled tower maze, it ignores
    blocking towers entirely (still stopped by rock/walls); `splits: true`
-   + `splitChance`/`splitHpFrac` (demon) spawns a weaker copy of itself
+   + `splitChance`/`splitHpFrac` (demon, horned devil) spawns a weaker copy of itself
    on death via `spawnChild()`, which sets `child: true` on the copy so
-   it can't chain-split; `submerges: true` (eel) makes `isSubmerged(c)`
+   it can't chain-split; `submerges: true` (eel, kraken) makes `isSubmerged(c)`
    (a per-creep `c.subPhase`-offset time cycle, `% 4 < 1.5`) return true
    ~40% of the time, during which it's excluded from every damage
    source's targeting filter (trap victims, bolt/splash/slow targets,
@@ -429,9 +456,12 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 
 - NetHack voice everywhere: messages read like NetHack ("You feel a
   draft...", zorkmids for gold, tombstone on death). Monsters are letter
-  glyphs with classic meanings; keep new ones consistent with real
-  NetHack (`L` lich is a good next pick). `; x &` are already taken
-  (eel, grid bug, demon — see section 3).
+  glyphs with classic meanings, but a glyph is no longer 1:1 with a
+  monster identity — remember `MONSTERS` is now keyed by an id string
+  with a separate `ch` (see section 3), so a new monster can either add
+  a new tier to an existing glyph's family (a real-NetHack-authentic
+  move — `d` canines, `o` orcs, `T` trolls, `&` demons all already do
+  this) or claim an unused glyph outright.
 - Colors: phosphor-green baseline (`#3d6b3d` floors, `#50ff96` accents);
   monsters/towers get muted CRT-friendly colors, full white reserved for
   hit-flash.

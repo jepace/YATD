@@ -19,6 +19,20 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **~30-monster roster with per-dungeon-level gating.** `MONSTERS` grew
+  from 11 entries to ~30, now keyed by an id string with its own `ch`
+  (glyph), decoupled from the key — several tiers share a letter the way
+  real NetHack's monster classes do (`d` canines jackal→wolf→warg, `o`
+  orcs, `T` trolls, `&` demons). `genWaves`'s pool entries are now gated
+  on `minDlvl`/`maxDlvl` in addition to the existing `min` (wave-within-
+  level): grid bugs, for instance, are gone by Dlvl 3 instead of showing
+  up at any depth just because it's wave 1 of that level. Special
+  abilities (flying, submerging, splitting, fast regen) are spread
+  across 2–4 monsters apiece now instead of one signature monster each,
+  for more run-to-run variety. See `CLAUDE.md` section 3 before adding
+  or re-tiering an entry — there's an invariant about keeping at least
+  one uncapped `min: 1` pool entry so no (dlvl, wave) combo ever comes
+  up with zero eligible monsters.
 - **Gold value scales down with depth.** `towerCost(type)` multiplies
   every build/enchant price by `1.18^(dlvl-1)` on top of the base cost
   in `TOWERS`, so the gold you're still sitting on by Dlvl 5 doesn't go
@@ -87,11 +101,11 @@ only) vs. when full browser verification is still warranted.
    bleeps/square waves: build chirp, zap, monster death, leak thud, boss
    roar, victory arpeggio, a distinct descend chime. `m` to mute, default
    ON but quiet.
-3. **Lich (`L`).** The one remaining monster idea from the original list:
-   casts haste on nearby monsters — proximity check among `G.creeps` each
-   frame, cheap at this creep count. Gate it to a mid/high `min` wave or
-   a minimum `dlvl` in the `genWaves` pool (support casters should show
-   up once the player has real infrastructure to lose).
+3. **Give the lich (`L`) its signature ability.** It's shipped as a
+   plain high-HP/regen Dlvl-5 monster (see "most recently shipped"
+   above) but not yet the actual support caster from the original idea:
+   a haste aura on nearby monsters — proximity check among `G.creeps`
+   each frame, cheap at this creep count.
 4. **Level topology variety.** Right now every Dlvl uses the same
    `genPath`/`genRooms` shape, just re-rolled and scaled harder. Add 1-2
    alternate topology generators (a big open cavern, a branching Y-split)
@@ -112,6 +126,21 @@ only) vs. when full browser verification is still warranted.
    feel a malignant aura..."): monsters hasted, towers -25% range, double
    bounty, fog (map dimmed outside tower ranges). One modifier every few
    waves keeps builds honest.
+6b. **Blessed/uncursed/cursed items** (not the same idea as 6 — this is
+   real NetHack's per-item quality system, raised and deliberately
+   deferred in an earlier session). The real cost isn't the effect
+   table, it's that `G.inv` currently holds plain stack counts
+   (`G.inv.scroll`, `G.inv.wand`, ...) with no per-item identity to hang
+   a quality on — doing this properly means reworking inventory into
+   arrays of `{quality}` entries, updating `drawInventory()` to show
+   NetHack's `B`/`U`/`C` prefixes, and deciding a deliberate
+   effect-magnitude swing per item type (what does a *cursed* scroll of
+   fireball or wand of cold actually do — fizzle? backfire on the
+   player's own towers? just weaker?) consistent with the "nothing is
+   perfect" design note in `CLAUDE.md` section 3. Suggested odds if
+   picked up: roughly NetHack's own ~1/6 blessed, ~1/6 cursed, rest
+   uncursed. Get explicit sign-off on the odds and the cursed-effect
+   design before starting — it touches the data model, not just a table.
 7. **More tower variety.** `)` Hired adventurer (blocks the corridor,
    melees, has HP like the dirt wall but actually fights back, monsters
    attack it — no LOS needed, it's melee), `"` Amulet shrine (aura buff

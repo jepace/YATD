@@ -100,14 +100,27 @@ Towers can be enchanted up to level 4 (`u`) for more damage, range,
 
 ## Monsters
 
-`r` sewer rat · `x` grid bug (weak but fast and cheap) · `a` giant ant ·
-`b` cave bat (**flies over your towers** — the counter to turtling
-behind a wall) · `k` kobold · `;` giant eel (**submerges** — periodically
-untargetable by everything except a scroll of fireball, and always
-immune to electricity) · `o` orc · `&` demon (splits into a weaker copy
-when killed, and is always fire-immune) · `Z` zombie · `T` troll
-(**regenerates fast** — leave one half-dead and it won't stay that way)
-· `D` dragon (the boss, tougher on every dungeon level)
+Around 30 monster types, in tiers that phase in and out with dungeon
+depth — a grid bug that harasses you on Dlvl 1 is long gone by Dlvl 3,
+and things like the troll chieftain or kraken don't show up before Dlvl
+5. Several glyphs cover more than one tier, real-NetHack-style (the `d`
+canine line runs jackal → wolf → warg as you descend, `o` runs orc →
+orc captain, `T` runs troll → troll chieftain, `&` runs demon → horned
+devil) — same letter, different name/color/stats, so don't assume a
+glyph always means the exact same monster.
+
+Special abilities are spread across several tiers rather than one
+signature monster apiece, so which ones you'll face varies run to run:
+**flying** (cave bat, vampire bat, wraith — ignores your towers
+entirely, the counter to turtling behind a wall), **submerging** (giant
+eel, kraken — periodically untargetable by everything except a scroll
+of fireball, and always electricity-immune), **splitting** (demon,
+horned devil — spawns a weaker copy of itself on death, and is always
+fire-immune), and **fast regeneration** (troll, troll chieftain, ghoul,
+lich — leave one half-dead and it won't stay that way for long). `D`
+the dragon is always the wave-10 boss, tougher on every dungeon level,
+and its color (and matching elemental immunity) is re-rolled fresh each
+level — see below.
 
 Every monster heals a little when left alone — like a tower recharging,
 chip damage that isn't followed up gets undone over time. It's slow
