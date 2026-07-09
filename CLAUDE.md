@@ -59,8 +59,8 @@ The `<script>` is organized top-to-bottom in sections (marked with
    (a per-creep `c.subPhase`-offset time cycle, `% 4 < 1.5`) return true
    ~40% of the time, during which it's excluded from every damage
    source's targeting filter (trap victims, bolt/splash/slow targets,
-   splash's secondary AoE loop) EXCEPT `useScroll()`'s fireball, which
-   intentionally ignores submersion — if you add a new AoE/instant-hit
+   splash's secondary AoE loop) EXCEPT `resolveTargeting()`'s fireball,
+   which intentionally ignores submersion — if you add a new AoE/instant-hit
    effect, decide deliberately whether it should respect submersion and
    say so in a comment, since it's easy to forget one of the four
    existing filter sites when adding a fifth. Every monster passively
@@ -113,15 +113,29 @@ The `<script>` is organized top-to-bottom in sections (marked with
    — they participate in the maze system automatically via `blocks: true`,
    which is the whole point of that flag being generic.
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
-   `?` scroll of fireball (`r`, 45 fire dmg to all — respects dragon fire
+   `?` scroll of fireball (`r`, 45 fire dmg — respects dragon fire
    immunity, see below), `!` potion of haste (`q`, towers 2× rate 8s via
-   `G.hasteUntil`), `/` wand of cold (`z`, slow all 4s), `/` wand of
+   `G.hasteUntil`), `/` wand of cold (`z`, slows), `/` wand of
    charging (`c`, restores `t.lvl` dice of `d6` to every tower's
    `charges`/`hp` that's below max — deliberately NOT a guaranteed
    full top-off, in keeping with "nothing is perfect" — applies uniformly
    to any tower with `spec.maxCharges` or `spec.hp` set, so the wand of
    lightning benefits from it exactly like the wand of striking with no
-   special-casing needed). Inventory in `G.inv`; view with the `i`
+   special-casing needed). The fireball scroll and cold wand are
+   **targeted, not instant**: `r`/`z` calls `beginScroll()`/`beginWand()`,
+   which arms `G.targeting = { kind, radius }` via `setTargeting()`
+   (auto-pausing like a menu/overlay, see `setMenu`/`setOverlay` below)
+   instead of applying the effect immediately; the next click, or ENTER
+   on the keyboard cursor, calls `resolveTargeting(x,y)`, which only hits
+   creeps (via `creepCell`) within `radius` of that point, then consumes
+   the inventory slot. `drawGame()` renders a live range-preview circle
+   at the hover/cursor position while targeting is active (same
+   `drawRange()` helper the menu's tower-range preview uses, different
+   tint). Escape while targeting cancels without consuming the item, and
+   both hotkeys are only reachable from the base `keydown` switch (after
+   the overlay-swallow and menu-key-match blocks), so a targeting arm can
+   never fire while an overlay/menu is already open. Inventory in
+   `G.inv`; view with the `i`
    overlay (`drawInventory`). All game
    events go through `message(s)`, which both sets the message line and
    appends to `G.log` (viewed via the `log` overlay, `Ctrl-P`,
@@ -311,15 +325,17 @@ The `<script>` is organized top-to-bottom in sections (marked with
    is open; a click always tries the overlay first (closes it without
    also opening a menu — a second click is needed to actually open one).
 
-   **Opening either an overlay or the menu auto-pauses a running wave**,
-   and closing it auto-resumes — `setOverlay(name)`/`setMenu(m)` are the
-   only correct way to mutate `G.overlay`/`G.menu`; they call
+   **Opening an overlay, the menu, or a targeting arm auto-pauses a
+   running wave**, and closing/resolving/cancelling it auto-resumes —
+   `setOverlay(name)`/`setMenu(m)`/`setTargeting(t)` are the only correct
+   way to mutate `G.overlay`/`G.menu`/`G.targeting`; they call
    `autoPause()`/`autoResume()` on the open/close transition. Never
-   assign `G.overlay =` / `G.menu =` directly. `G.autoPaused` tracks
-   *why* it's paused so a manual `SPACE` pause (or a boss-kill pause, see
-   section 4) is never silently undone by closing a menu that happened
-   to also be open — `autoResume()` only un-pauses if `G.autoPaused` is
-   true, i.e. WE were the one who paused it.
+   assign `G.overlay =` / `G.menu =` / `G.targeting =` directly.
+   `G.autoPaused` tracks *why* it's paused so a manual `SPACE` pause (or
+   a boss-kill pause, see section 4) is never silently undone by closing
+   a menu/targeting arm that happened to also be open — `autoResume()`
+   only un-pauses if `G.autoPaused` is true, i.e. WE were the one who
+   paused it.
 
    Bindings mirror NetHack where one exists (`r`ead, `q`uaff, `z`ap,
    `i`nventory, `Ctrl-P` message log); `h j k l y u2 b n` are cursor
@@ -327,9 +343,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
    the menu's upgrade/sell, not diagonal cursor movement, so avoid
    reusing those two letters for anything else). `SPACE` is contextual:
    `startWave()` while `G.state === "build"`, otherwise toggles
-   `G.paused` — except it's a no-op while `G.menu && G.autoPaused` is
-   true, since pause state is governed by the menu in that case, not by
-   SPACE.
+   `G.paused` — except it's a no-op while `(G.menu || G.targeting) &&
+   G.autoPaused` is true, since pause state is governed by the open
+   menu/targeting arm in that case, not by SPACE.
 
 8. **Main loop** — fixed-timestep (`STEP = 1/60`) accumulator inside
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put

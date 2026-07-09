@@ -32,13 +32,19 @@ particular first dungeon (the seed is shown on the title screen).
 ## Items
 
 Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of
-fireball (`r`ead one to scour every monster with fire), `!` potions of
-haste (`q`uaff to double your towers' speed for 8s), `/` wands of cold
-(`z`ap to slow everything on the level), and `/` wands of charging
-(`c`harge to restore charges and HP to every wand and wall that needs
-it — like the real NetHack item, it's a dice roll, not a guaranteed
-top-off, and rolls better on your higher-level towers). Press `i` to
-check your pack.
+fireball, `!` potions of haste (`q`uaff to double your towers' speed for
+8s), `/` wands of cold, and `/` wands of charging (`c`harge to restore
+charges and HP to every wand and wall that needs it — like the real
+NetHack item, it's a dice roll, not a guaranteed top-off, and rolls
+better on your higher-level towers). Press `i` to check your pack.
+
+The scroll of fireball and wand of cold are **targeted**: `r`ead or
+`z`ap arms it, then click a tile (or move the keyboard cursor there and
+press `ENTER`) to choose the impact point — a preview circle shows the
+blast radius as you aim. Only monsters within that radius are hit;
+`Escape` cancels without consuming the item. Fireball burns everything
+in a 4-tile radius for 45 fire damage; the wand of cold slows everything
+in a 4.5-tile radius for 4s.
 
 ## Towers
 
@@ -137,7 +143,8 @@ the clock while deciding what to build.
   the game is waiting on you specifically — wave-clears and boss kills
   both stop for it).
 - `r` read scroll · `q` quaff potion · `z` zap wand of cold · `c` zap
-  wand of charging · `i` inventory
+  wand of charging · `i` inventory. Reading the scroll or zapping the
+  cold wand arms a targeted deploy — see Items above.
 - `Ctrl-P` message log (like NetHack's `^P`) · `?` help · `Escape` closes
   whatever overlay or menu is open
 - `a` auto-start waves · `+`/`-` game speed · `R` restart

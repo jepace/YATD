@@ -19,6 +19,13 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Targeted scroll/wand deploy.** The fireball scroll and cold wand no
+  longer hit every monster on the level instantly — `r`/`z` arms a
+  targeting reticle (`G.targeting`, auto-pausing like a menu), a click or
+  `ENTER` on the cursor picks the impact point with a live range-preview
+  circle, and only creeps within that radius are affected. See
+  `CLAUDE.md` section 3 (`resolveTargeting`) and section 7
+  (`setTargeting`) before touching it.
 - **Tile-action menu replacing the readied-tool model.** Click a tile
   (or `ENTER` the cursor onto it) for a popup listing every action legal
   there — build options, or an existing tower's upgrade/sell. No more

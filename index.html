@@ -464,6 +464,7 @@ const G = {
   towers: [], creeps: [], fx: [], flow: null, flowFly: null,
   spawnQueue: [], spawnTimer: 0,
   menu: null,                          // { x, y } tile whose action menu is open
+  targeting: null,                     // { kind, radius } while aiming a scroll/wand
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
@@ -500,6 +501,11 @@ function setMenu(m) {
   else if (!m && G.menu) autoResume();
   G.menu = m;
 }
+function setTargeting(t) {
+  if (t && !G.targeting) autoPause();
+  else if (!t && G.targeting) autoResume();
+  G.targeting = t;
+}
 
 function resetGame() {
   G.dlvl = 1;
@@ -510,7 +516,7 @@ function resetGame() {
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
   G.score = 0; G.kills = 0;
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
-  G.spawnQueue = []; G.menu = null;
+  G.spawnQueue = []; G.menu = null; G.targeting = null;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
@@ -527,7 +533,7 @@ function descend() {
   genWaves(G.dlvl);
   G.wave = 0;
   G.towers = []; G.creeps = []; G.fx = [];
-  G.spawnQueue = []; G.menu = null;
+  G.spawnQueue = []; G.menu = null; G.targeting = null;
   G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
@@ -748,31 +754,58 @@ function dropItem() {
     message("You find a wand of charging!  [c]harge to restore your towers.");
   }
 }
-function useScroll() {
+// scroll of fireball and wand of cold are targeted: pressing the hotkey
+// arms G.targeting instead of firing immediately, and the next click (or
+// ENTER on the cursor) picks the impact point -- see resolveTargeting()
+function beginScroll() {
   if (G.inv.scroll < 1) { message("You have no scrolls to read."); return; }
-  G.inv.scroll--;
-  for (const c of [...G.creeps]) {
-    if (c.dead) continue;
-    const [x, y] = creepCell(c);
-    splashFx(x, y, "#ff8850");
-    damageCreep(c, 45, "fire");
+  setTargeting({ kind: "scroll", radius: 4.0 });
+  message("Where do you want to hurl the fireball?  (click a tile, ESC cancels)");
+}
+function beginWand() {
+  if (G.inv.wand < 1) { message("You have no wands to zap."); return; }
+  setTargeting({ kind: "wand", radius: 4.5 });
+  message("Where do you want to aim the wand of cold?  (click a tile, ESC cancels)");
+}
+function resolveTargeting(x, y) {
+  const { kind, radius } = G.targeting;
+  setTargeting(null);
+  const inRange = c => {
+    if (c.dead) return false;
+    const [cx, cy] = creepCell(c);
+    return Math.hypot(cx - x, cy - y) <= radius;
+  };
+  if (kind === "scroll") {
+    G.inv.scroll--;
+    let hit = 0;
+    for (const c of [...G.creeps]) {
+      if (!inRange(c)) continue;
+      const [cx, cy] = creepCell(c);
+      splashFx(cx, cy, "#ff8850");
+      damageCreep(c, 45, "fire");
+      hit++;
+    }
+    message(hit
+      ? "You read the scroll.  A pillar of flame erupts!"
+      : "You read the scroll, but nothing was close enough to burn.");
+  } else if (kind === "wand") {
+    G.inv.wand--;
+    let hit = 0;
+    for (const c of G.creeps) {
+      if (!inRange(c)) continue;
+      c.slowUntil = G.time + 4; c.slowFactor = 0.4;
+      hit++;
+    }
+    message(hit
+      ? "You zap the wand of cold.  Monsters nearby shiver and slow!"
+      : "You zap the wand of cold, but nothing was close enough to chill.");
   }
-  message("You read the scroll.  A pillar of flame scours the dungeon!");
 }
 function usePotion() {
   if (G.inv.potion < 1) { message("You have no potions to quaff."); return; }
   G.inv.potion--;
   G.hasteUntil = G.time + 8;
   message("Gulp.  Your towers hum with supernatural speed! (8s)");
-}
-function useWand() {
-  if (G.inv.wand < 1) { message("You have no wands to zap."); return; }
-  G.inv.wand--;
-  for (const c of G.creeps) {
-    if (c.dead) continue;
-    c.slowUntil = G.time + 4; c.slowFactor = 0.4;
-  }
-  message("You zap the wand of cold.  Every monster shivers and slows!");
 }
 function useCharge() {
   if (G.inv.charge < 1) { message("You have no wands of charging."); return; }
@@ -1020,6 +1053,7 @@ function drawGame() {
   const hy = G.cursor.on ? G.cursor.y : G.hover.y;
   const menuTower = G.menu && towerAt(G.menu.x, G.menu.y);
   if (menuTower) drawRange(menuTower.x, menuTower.y, towerRange(menuTower), "#12241a");
+  if (G.targeting) drawRange(hx, hy, G.targeting.radius, "#2a1a1a");
 
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
@@ -1279,6 +1313,10 @@ canvas.addEventListener("mousedown", (e) => {
   G.hover.x = x; G.hover.y = y;   // keep the range-preview in sync with the click
   if (y < 0 || y >= MAPH) return;
 
+  // targeting (a scroll/wand being aimed) takes priority over everything
+  // else -- a click anywhere on the map picks the impact point
+  if (G.targeting) { resolveTargeting(x, y); return; }
+
   // a click inside the currently-open menu's box runs whichever option
   // line it landed on (or does nothing, if it hit the title/border/
   // footer rather than an option) -- either way it does NOT also
@@ -1330,6 +1368,19 @@ window.addEventListener("keydown", (e) => {
   }
   if (G.overlay) { if (e.key === "Escape") setOverlay(null); return; }
 
+  // targeting (a scroll/wand being aimed): Escape cancels without
+  // consuming the item, ENTER on the cursor confirms the impact point --
+  // everything else (notably hjkl/arrows) falls through so the cursor
+  // can still be moved to aim without a mouse
+  if (G.targeting) {
+    if (e.key === "Escape") {
+      const kind = G.targeting.kind; setTargeting(null);
+      message("You decide against it, for now.  (" + (kind === "scroll" ? "scroll" : "wand") + " unused)");
+      return;
+    }
+    if (e.key === "Enter") { if (G.cursor.on) resolveTargeting(G.cursor.x, G.cursor.y); return; }
+  }
+
   // the tile-action menu: Escape closes it, and any key matching one of
   // its currently-shown [key] options runs that action -- everything
   // else (hjkl, SPACE, item hotkeys...) falls through and keeps working,
@@ -1344,7 +1395,7 @@ window.addEventListener("keydown", (e) => {
 
   switch (e.key) {
     case " ":
-      if (G.menu && G.autoPaused) return; // pause state is governed by the open menu, not SPACE
+      if ((G.menu || G.targeting) && G.autoPaused) return; // pause state is governed by the open menu/targeting, not SPACE
       if (G.state === "build") { startWave(); return; }
       if (G.state === "wave") {
         G.paused = !G.paused;
@@ -1357,9 +1408,9 @@ window.addEventListener("keydown", (e) => {
       message("Game speed x" + G.speed); return;
     case "-": G.speed = Math.max(1, G.speed / 2);
       message("Game speed x" + G.speed); return;
-    case "r": useScroll(); return;
+    case "r": beginScroll(); return;
     case "q": usePotion(); return;
-    case "z": useWand(); return;
+    case "z": beginWand(); return;
     case "c": useCharge(); return;
     case "R": resetGame(); return;
     case "Enter":
