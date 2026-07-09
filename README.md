@@ -192,7 +192,13 @@ the clock while deciding what to build.
   overlay or the monster lore popup, same as `Escape`.
 - `r` read scroll · `q` quaff potion · `z` zap wand of cold · `c` zap
   wand of charging · `i` inventory. Reading the scroll or zapping the
-  cold wand arms a targeted deploy — see Items above.
+  cold wand arms a targeted deploy — see Items above. **The wand of
+  charging has no target at all** — unlike the fireball scroll or wand
+  of cold, it's a burst that recharges every tower on the level at once,
+  not something you aim; that's why it never prompts for a tile.
+- The inventory screen is directly usable, not just a readout: click an
+  item's row (or press its hotkey while the screen is open) to use it on
+  the spot instead of closing the menu and pressing the hotkey again.
 - `Ctrl-P` message log (like NetHack's `^P`) · `?` help · `Escape` closes
   whatever overlay or menu is open
 - `a` auto-start waves · `+`/`-` game speed · `R` restart

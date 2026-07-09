@@ -176,7 +176,25 @@ The `<script>` is organized top-to-bottom in sections (marked with
    the overlay-swallow and menu-key-match blocks), so a targeting arm can
    never fire while an overlay/menu is already open. Inventory in
    `G.inv`; view with the `i`
-   overlay (`drawInventory`). All game
+   overlay (`drawInventory`), which is directly usable rather than a pure
+   readout — `invItems()` is the single source of truth for which items
+   you're carrying and what each one's hotkey does; `invLayout()` adds
+   the exact screen row each item's two lines land on (mirroring the
+   tile-action menu's `menuLayout`/`menuBox` convention: `drawInventory()`
+   and `mousedown`'s hit-test both derive their row math from the same
+   function, so they can't disagree about where a row actually is).
+   Pressing an item's hotkey OR clicking its row while `G.overlay ===
+   "inv"` runs that item's action immediately and closes the overlay —
+   handled by a dedicated block in `keydown` (before the generic
+   overlay-swallow) and in `mousedown` (before the generic
+   click-closes-overlay fallback in `toggleMenu`), since the whole point
+   of opening the inventory is usually to decide what to use, not to
+   memorize a hotkey and close it first. The wand of charging is the one
+   item with no `beginX()`/targeting step — it's a burst effect over
+   every tower on the level, not aimed at a tile at all, which is worth
+   remembering if you add a new consumable: decide deliberately whether
+   it's aimed (`beginScroll`/`beginWand`'s pattern) or a blanket effect
+   (`useCharge`'s), don't assume every wand gets a targeting reticle. All game
    events go through `message(s)`, which both sets the message line and
    appends to `G.log` (viewed via the `log` overlay, `Ctrl-P`,
    NetHack-style). There is no floating combat text — kills, drops, leaks

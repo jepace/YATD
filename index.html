@@ -1496,28 +1496,46 @@ function drawHelp() {
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }
+const INV_BOX = { x0: 14, y0: 6, w: 52, h: 14 };
+// items you're actually carrying, with the function each one's hotkey
+// invokes -- used both to draw the inventory and, so you can act on an
+// item directly from the inventory screen instead of having to close it
+// and press the hotkey again, to dispatch a keypress/click while it's open
+function invItems() {
+  return [
+    { ch: "?", name: "scroll of fireball", n: G.inv.scroll, key: "r", label: "read (aimed)",  action: beginScroll },
+    { ch: "!", name: "potion of haste",    n: G.inv.potion, key: "q", label: "quaff",         action: usePotion },
+    { ch: "/", name: "wand of cold",       n: G.inv.wand,   key: "z", label: "zap (aimed)",   action: beginWand },
+    { ch: "/", name: "wand of charging",   n: G.inv.charge, key: "c", label: "use (charges every tower)", action: useCharge },
+  ].filter(it => it.n > 0);
+}
+// invItems() plus the exact screen row each one's two lines land on --
+// drawInventory() and mousedown's click-hit-test both derive their row
+// math from this SAME function, same convention as the tile-action menu
+function invLayout() {
+  let row = INV_BOX.y0 + 2;
+  const items = invItems().map(it => {
+    const laid = { ...it, row0: row, row1: row + 1 };
+    row += 2;
+    return laid;
+  });
+  return items;
+}
 function drawInventory() {
-  const x0 = 14, y0 = 6, w = 52, h = 14;
+  const { x0, y0, w, h } = INV_BOX;
   overlayBox(x0, y0, w, h);
-  const rows = [
-    ["?", "scroll of fireball",  G.inv.scroll, "r read"],
-    ["!", "potion of haste",     G.inv.potion, "q quaff"],
-    ["/", "wand of cold",        G.inv.wand,   "z zap"],
-    ["/", "wand of charging",    G.inv.charge, "c zap"],
-  ];
   text(x0 + 2, y0, "----------------- Inventory -----------------", "#e8e850");
-  let row = y0 + 2;
-  const carried = rows.filter(r => r[2] > 0);
-  if (!carried.length) {
-    text(x0 + 2, row, "You are not carrying anything.", "#8aa87a");
+  const items = invLayout();
+  if (!items.length) {
+    text(x0 + 2, y0 + 2, "You are not carrying anything.", "#8aa87a");
   } else {
-    for (const [ch, name, n, use] of carried) {
-      text(x0 + 2, row, ch + " - " + name + " (x" + n + ")", "#c8e8b8");
-      text(x0 + 2, row + 1, "    " + use, "#6a8a6a");
-      row += 2;
+    for (const it of items) {
+      text(x0 + 2, it.row0, it.ch + " - " + it.name + " (x" + it.n + ")", "#c8e8b8");
+      text(x0 + 2, it.row1, "    [" + it.key + "] " + it.label, "#6a8a6a");
     }
   }
-  text(x0 + 2, y0 + h - 2, "i or ESC to close", "#6a8a6a");
+  text(x0 + 2, y0 + h - 2, "click a line or press its key to use it", "#6a8a6a");
+  text(x0 + 2, y0 + h - 1, "i or ESC to close", "#6a8a6a");
 }
 function drawLog() {
   const x0 = 4, y0 = 1, w = 72, h = 20;
@@ -1618,6 +1636,20 @@ canvas.addEventListener("mousedown", (e) => {
   // rather than also opening whatever's underneath
   if (G.lore) { setLore(null); return; }
 
+  // clicking an item's row in the inventory screen uses it directly,
+  // same as pressing its hotkey would -- clicking anywhere else in the
+  // overlay still just closes it (falls through to toggleMenu() below)
+  if (G.overlay === "inv") {
+    const sx = x, sy = MAPY + y;
+    const { x0, w } = INV_BOX;
+    if (sx >= x0 && sx < x0 + w) {
+      const item = invLayout().find(it => sy === it.row0 || sy === it.row1);
+      if (item) { setOverlay(null); item.action(); return; }
+    }
+    setOverlay(null);
+    return;
+  }
+
   // clicking a tile with a live creep on it (and no tower -- a tower's
   // upgrade/sell menu takes priority, e.g. a flying creep sharing a
   // tower's cell) shows that monster's lore instead of the build menu a
@@ -1679,6 +1711,15 @@ window.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === "p") {
     e.preventDefault();
     setOverlay(G.overlay === "log" ? null : "log");
+    return;
+  }
+  // the inventory screen lets you act on an item directly instead of
+  // making you close it and press the hotkey again -- the whole point
+  // of opening it is usually to decide what to use
+  if (G.overlay === "inv") {
+    if (e.key === "Escape" || e.key === " ") { setOverlay(null); return; }
+    const item = invItems().find(it => it.key === e.key.toLowerCase());
+    if (item) { setOverlay(null); item.action(); return; }
     return;
   }
   // SPACE closes an overlay too, not just Escape -- NetHack itself uses
