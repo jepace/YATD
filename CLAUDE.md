@@ -377,7 +377,18 @@ The `<script>` is organized top-to-bottom in sections (marked with
    need LOS (contact-triggered). `damageCreep()` handles death, bounty,
    and messages. Visuals are `G.fx` only (short-lived beam/splash glyph
    overlays) — no floating combat text; all of that is `message()` calls
-   now.
+   now. A creep that dies or leaks is removed from `G.creeps` in the very
+   same `update()` call that killed/leaked it (`updateCreeps` filters
+   dead creeps immediately, and `updateTowers` — which calls
+   `damageCreep()` — runs earlier in the same `update()`), so without a
+   marker it would never actually be rendered at all: gone between one
+   `draw()` and the next with nothing to show it was ever there. A
+   0.35s-`ttl` `G.fx` entry at the creep's cell (a `%` corpse glyph for a
+   kill in `damageCreep()`'s kill branch, the creep's own glyph in red for
+   a leak in `updateCreeps`' exit-cell branch) guarantees at least one
+   visible frame regardless of exactly when in the update the death
+   landed — most noticeable right at the stairs, since that's exactly
+   where the player is watching closely for a leak.
 
 6. **Rendering** — `drawGame()` rebuilds the whole cell buffer every
    frame: map → range highlight → towers → creeps → fx → cursor →

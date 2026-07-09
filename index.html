@@ -892,6 +892,8 @@ function damageCreep(c, dmg, dtype) {
   if (c.hp <= 0 && !c.dead) {
     c.dead = true;
     const m = MONSTERS[c.type];
+    const [cx, cy] = creepCell(c);
+    deathFx(cx, cy, m.fg);
     G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
     if (m.boss) {
       message("The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--");
@@ -1038,6 +1040,19 @@ function splashFx(x, y, fg) {
     cells.push([x + dx, y + dy]);
   G.fx.push({ cells, ch: "*", fg, ttl: 0.12 });
 }
+// a dying creep is removed from G.creeps in the very same update() call
+// that killed it (updateTowers runs before updateCreeps, and updateCreeps
+// filters dead creeps immediately) -- with no per-frame death animation,
+// a kill that lands the instant before draw() next runs was never
+// actually rendered, which reads as the monster just vanishing without
+// being "shown" at all (most noticeable right at the exit, since that's
+// exactly where the player is watching closely for a leak). A short-
+// lived corpse glyph (NetHack's own convention for a fresh kill) at the
+// creep's last cell guarantees at least one visible frame regardless of
+// exactly when in the update the kill landed.
+function deathFx(x, y, fg) {
+  G.fx.push({ cells: [[x, y]], ch: "%", fg, ttl: 0.35 });
+}
 
 function updateTowers(dt) {
   const hasteMul = G.time < G.hasteUntil ? 0.5 : 1;   // potion of haste
@@ -1148,6 +1163,10 @@ function updateCreeps(dt) {
       c.x = c.nx; c.y = c.ny;
       if (c.x === ex && c.y === ey) {
         c.dead = true; c.leaked = true;
+        // same reasoning as deathFx() -- a leaked creep is filtered out
+        // of G.creeps in this very call, so without a marker it would
+        // never actually be seen reaching the stairs
+        G.fx.push({ cells: [[ex, ey]], ch: m.ch, fg: "#ff5050", ttl: 0.35 });
         G.hp -= m.leak;
         message("The " + m.name + " descends the stairs!  You lose " + m.leak + " HP.");
         if (G.hp <= 0) { G.hp = 0; G.state = "lost"; }
