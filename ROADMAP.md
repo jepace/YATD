@@ -30,7 +30,14 @@ a letter — letters are exclusively monsters now (see `CLAUDE.md` section
 3); idea 7 below has been updated to match. New blocking towers should
 set `blocks: true` in `TOWERS` and will automatically participate in the
 maze system; non-blocking (contact/aura) towers should set
-`blocks: false` like the fire trap.
+`blocks: false` like the fire trap. Also shipped: **limited wand
+charges** (`TOWERS[1].maxCharges`, regenerates passively, refills on
+enchant — the counter to a wall of cheap wands needing zero upkeep), and
+two new monster behaviors — `b` cave bat (`flies: true`, ignores every
+blocking tower via a separate `G.flowFly` field, the counter to turtling
+behind a maze) and `&` demon (`splits: true`, spawns a weaker copy on
+death via `spawnChild()`). Idea 4 below has been trimmed to the
+remaining un-shipped suggestions.
 
 **Process note:** the user has asked that changes here be verified by
 code review, not by launching a headless browser to click through the
@@ -50,11 +57,14 @@ only) vs. when full browser verification is still warranted.
 3. **Sound via WebAudio.** No assets — synthesize terminal-appropriate
    bleeps/square waves: build chirp, zap, monster death, leak thud, boss
    roar, victory arpeggio. `m` to mute, default ON but quiet.
-4. **More monster behaviors.** Cheap wins with the existing creep struct:
-   `;` giant eel (submerges: untargetable every few seconds), `&` demon
-   (gates in a copy at half HP on death), `L` lich (casts haste on nearby
-   monsters), `x` grid bug (cannot move diagonally — flavor text only,
-   they already can't). Add waves 11–15 or weave into higher Dlvls.
+4. **More monster behaviors.** `b` bat and `&` demon are shipped (see
+   above). Still open: `;` giant eel (submerges: untargetable every few
+   seconds — needs a `submergedUntil` field and a check in the
+   tower-targeting filter next to the existing LOS check), `L` lich
+   (casts haste on nearby monsters — proximity check among `G.creeps`
+   each frame, cheap at this creep count), `x` grid bug (cannot move
+   diagonally — flavor text only, movement is already 4-directional).
+   Add waves 11–15 or weave into higher Dlvls.
 
 ## Medium
 

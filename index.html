@@ -282,11 +282,13 @@ const trapPlaceable = (x, y) => {
 // shortest currently-open route to the stairs, recomputed as a BFS flow
 // field (dist-to-exit + which neighbor to step toward) whenever a
 // blocking tower is built or sold. `extraBlocked` lets buildTower() do a
-// dry-run check before committing to a placement.
-function computeFlow(extraBlocked) {
+// dry-run check before committing to a placement. `ignoreTowerBlocks`
+// computes the field flying monsters use -- they cut straight through
+// any wall of towers, only rock/walls stop them (see G.flowFly).
+function computeFlow(extraBlocked, ignoreTowerBlocks) {
   const dist = Array.from({ length: MAPH }, () => new Array(MAPW).fill(Infinity));
   const next = Array.from({ length: MAPH }, () => new Array(MAPW).fill(null));
-  const blocked = new Set(
+  const blocked = new Set(ignoreTowerBlocks ? [] :
     G.towers.filter(t => TOWERS[t.type].blocks).map(t => t.x + "," + t.y));
   if (extraBlocked) for (const [ex, ey] of extraBlocked) blocked.add(ex + "," + ey);
   const passable = (x, y) =>
@@ -330,8 +332,8 @@ const TERRAIN_COLOR = {
 // and never blocks; monsters walk over it and trigger it on contact.
 const TOWERS = {
   1: { ch: "/", name: "Wand of Striking", cost: 10, dmg: 5, range: 5.0, cd: 0.55,
-       kind: "bolt", blocks: true, fg: "#e8e850",
-       desc: "cheap, quick single-target bolts" },
+       kind: "bolt", blocks: true, maxCharges: 25, fg: "#e8e850",
+       desc: "cheap, quick bolts; runs low on charges, recharges slowly" },
   2: { ch: "0", name: "Acid Blob", cost: 25, dmg: 7, range: 4.0, cd: 1.2,
        kind: "splash", blocks: true, splash: 1.6, fg: "#50e850",
        desc: "lobs acid; splash damage" },
@@ -345,11 +347,18 @@ const TOWERS = {
 const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 3;
 const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
 
+// `flies: true` ignores every blocking tower (only rock/walls stop it --
+// see G.flowFly/creepFlow) -- the counter to a turtled tower maze.
+// `splits`: on death, a chance to spawn a weaker copy of itself
+// (`child: true` on the spawned copy stops it from splitting again).
 const MONSTERS = {
   r: { name: "sewer rat", hp: 9,   spd: 3.4, bounty: 2,  leak: 1,  fg: "#b8825a" },
-  k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
   a: { name: "giant ant", hp: 8,   spd: 4.0, bounty: 1,  leak: 1,  fg: "#d0d050" },
+  b: { name: "cave bat",  hp: 10,  spd: 4.5, bounty: 3,  leak: 1,  fg: "#a050e8", flies: true },
+  k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
   o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
+  "&": { name: "demon",   hp: 55,  spd: 1.7, bounty: 9,  leak: 2,  fg: "#e850e8",
+         splits: true, splitChance: 0.5, splitHpFrac: 0.4 },
   Z: { name: "zombie",    hp: 85,  spd: 1.1, bounty: 8,  leak: 2,  fg: "#a8b8a8" },
   T: { name: "troll",     hp: 150, spd: 1.6, bounty: 15, leak: 3,  fg: "#50b8b8", regen: 3 },
   D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
@@ -364,8 +373,10 @@ function genWaves() {
   const pool = [
     { t: "r", cost: 1,  gap: 0.7,  min: 1 },
     { t: "a", cost: 1,  gap: 0.35, min: 2 },
+    { t: "b", cost: 2,  gap: 0.5,  min: 2 },
     { t: "k", cost: 2,  gap: 0.7,  min: 2 },
     { t: "o", cost: 5,  gap: 0.9,  min: 3 },
+    { t: "&", cost: 6,  gap: 1.0,  min: 4 },
     { t: "Z", cost: 8,  gap: 1.0,  min: 5 },
     { t: "T", cost: 16, gap: 1.5,  min: 7 },
   ];
@@ -399,7 +410,7 @@ const G = {
   state: "title",          // title | build | wave | won | lost
   gold: 40, hp: 20, maxHp: 20,
   wave: 0, score: 0, kills: 0,
-  towers: [], creeps: [], fx: [], flow: null,
+  towers: [], creeps: [], fx: [], flow: null, flowFly: null,
   spawnQueue: [], spawnTimer: 0,
   selType: 0, selTower: null,          // 0 = no tool readied
   cursor: { x: 40, y: 10, on: false },
@@ -428,7 +439,8 @@ function resetGame() {
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
   G.spawnQueue = []; G.selTower = null; G.selType = 0;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false;
-  G.flow = computeFlow();   // no towers on a fresh level, but keeps shape consistent
+  G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
+  G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
 }
 
@@ -452,10 +464,13 @@ function startWave() {
     : "Wave " + G.wave + " pours in from the up staircase...");
 }
 
-// point a creep at its next step toward the exit, per the current flow
-// field; null next means it's already standing on the exit cell
+// which flow field a creep uses: flyers cut straight through any wall
+// of towers (only rock/walls stop them), everything else routes around
+const creepFlow = (c) => MONSTERS[c.type].flies ? G.flowFly : G.flow;
+// point a creep at its next step toward the exit, per its flow field;
+// null next means it's already standing on the exit cell
 function advanceTarget(c) {
-  const step = G.flow.next[c.y][c.x];
+  const step = creepFlow(c).next[c.y][c.x];
   c.nx = step ? step[0] : c.x;
   c.ny = step ? step[1] : c.y;
 }
@@ -490,7 +505,8 @@ function creepCell(c) {
 // progress toward the next cell) -- lower is closer, used to prioritize
 // tower targeting the way "furthest along the path" did on a fixed route
 function creepProgress(c) {
-  const d = G.flow.dist[c.y] && G.flow.dist[c.y][c.x];
+  const dist = creepFlow(c).dist;
+  const d = dist[c.y] && dist[c.y][c.x];
   return (d === undefined ? Infinity : d) - c.t;
 }
 
@@ -509,7 +525,9 @@ function buildTower(type, x, y) {
   }
   if (G.gold < spec.cost) { message("You cannot afford that. (" + spec.cost + " zorkmids)"); return false; }
   G.gold -= spec.cost;
-  G.towers.push({ type, x, y, lvl: 1, cd: 0, spent: spec.cost });
+  const t = { type, x, y, lvl: 1, cd: 0, spent: spec.cost };
+  if (spec.maxCharges) t.charges = spec.maxCharges;
+  G.towers.push(t);
   if (spec.blocks) G.flow = computeFlow();
   message("You conjure a " + spec.name + ".");
   return true;
@@ -520,6 +538,7 @@ function upgradeTower(t) {
   const cost = upgradeCost(t);
   if (G.gold < cost) { message("Enchanting costs " + cost + " zorkmids; you are short."); return; }
   G.gold -= cost; t.spent += cost; t.lvl++;
+  if (TOWERS[t.type].maxCharges) t.charges = towerMaxCharges(t);  // enchanting refills it
   message("Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")");
 }
 function sellTower(t) {
@@ -533,6 +552,9 @@ function sellTower(t) {
 }
 const towerDmg = (t) => Math.round(TOWERS[t.type].dmg * Math.pow(UPG_MULT, t.lvl - 1));
 const towerRange = (t) => TOWERS[t.type].range + UPG_RANGE * (t.lvl - 1);
+const towerMaxCharges = (t) =>
+  Math.round(TOWERS[t.type].maxCharges * Math.pow(1.5, t.lvl - 1));
+const CHARGE_REGEN = 0.4;   // charges/sec -- ~1 every 2.5s while below max
 
 /* ---------- combat ---------- */
 function damageCreep(c, dmg) {
@@ -544,7 +566,21 @@ function damageCreep(c, dmg) {
     if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph! (+" + m.bounty + " zorkmids)");
     else message("The " + m.name + " is destroyed. (+" + m.bounty + " zorkmids)");
     if (!m.boss && rnd() < 0.08) dropItem();
+    if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
   }
+}
+// a lesser copy that claws free of a split monster's corpse -- carries
+// child:true so it can't chain-split itself
+function spawnChild(parent, m) {
+  const child = {
+    type: parent.type, x: parent.x, y: parent.y, nx: parent.x, ny: parent.y, t: 0,
+    hp: Math.max(1, Math.round(parent.maxHp * m.splitHpFrac)),
+    maxHp: Math.max(1, Math.round(parent.maxHp * m.splitHpFrac)),
+    spd: parent.spd, jit: ri(-1, 1), slowUntil: 0, hitFlash: 0, child: true,
+  };
+  advanceTarget(child);
+  G.creeps.push(child);
+  message("A lesser " + m.name + " claws free!");
 }
 
 /* ---------- items (random drops from kills) ---------- */
@@ -610,9 +646,13 @@ function splashFx(x, y, fg) {
 function updateTowers(dt) {
   const hasteMul = G.time < G.hasteUntil ? 0.5 : 1;   // potion of haste
   for (const t of G.towers) {
+    const spec = TOWERS[t.type];
+    if (spec.maxCharges) {
+      const max = towerMaxCharges(t);
+      if (t.charges < max) t.charges = Math.min(max, t.charges + CHARGE_REGEN * dt);
+    }
     t.cd -= dt;
     if (t.cd > 0) continue;
-    const spec = TOWERS[t.type];
     const dmg = towerDmg(t), range = towerRange(t);
     if (spec.kind === "trap") {
       const victims = G.creeps.filter(c => {
@@ -655,6 +695,8 @@ function updateTowers(dt) {
       splashFx(cx, cy, spec.fg);
       t.cd = spec.cd * hasteMul;
     } else { // bolt
+      if (spec.maxCharges && Math.floor(t.charges) < 1) continue; // out of charges
+      if (spec.maxCharges) t.charges--;
       damageCreep(targets[0], dmg);
       const [x, y] = creepCell(targets[0]);
       beamFx(t.x, t.y, x, y, spec.fg);
@@ -756,9 +798,10 @@ function drawGame() {
 
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
+    const empty = spec.maxCharges && Math.floor(t.charges) < 1;
     const bright = ["", "", "#ffffff", "#ffd0ff"][t.lvl] || spec.fg;
-    put(t.x, MAPY + t.y, spec.ch, t.lvl === 1 ? spec.fg : bright,
-        t === G.selTower ? "#243024" : undefined);
+    const fg = empty ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
+    put(t.x, MAPY + t.y, spec.ch, fg, t === G.selTower ? "#243024" : undefined);
   }
   for (const c of G.creeps) {
     const [x, y] = creepCell(c);
@@ -800,8 +843,9 @@ function drawGame() {
     const t = G.selTower, spec = TOWERS[t.type];
     l2 = spec.ch + " " + spec.name + " L" + t.lvl + "  dmg:" + towerDmg(t) +
       "  rng:" + towerRange(t).toFixed(1) +
+      (spec.maxCharges ? "  chg:" + Math.floor(t.charges) + "/" + towerMaxCharges(t) : "") +
       (t.lvl < MAX_LVL ? "  [u]pgrade $" + upgradeCost(t) : "  (max)") +
-      "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC:deselect";
+      "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC";
   } else {
     l2 = G.selType
       ? "Readied: " + TOWERS[G.selType].ch + " " + TOWERS[G.selType].name + "  place it!"
@@ -842,19 +886,17 @@ function drawHelp() {
     "TOWERS -- press 1-4, click/ENTER a tile (press the number",
     "again before each new placement). 1-3 block their tile",
     "and need line of sight; you can't wall off the stairs.",
-    " 1 / Wand of Striking  $10  bolts, blocks, needs LOS",
+    " 1 / Wand of Striking  $10  bolts, limited charges, recharges",
     " 2 0 Acid Blob         $25  splash, blocks, needs LOS",
     " 3 { Frost Fountain    $20  slows, blocks, needs LOS",
     " 4 ^ Fire Trap         $15  ON the corridor #, no block",
     "",
     "ITEMS: r read ?scroll  q quaff !potion  z zap /wand  i inv",
+    "KEYS: SPACE wave/pause  u upgrade  s sell  a auto  Ctrl-P log",
+    "      hjkl/arrows+ENTER cursor  + - speed  R restart",
     "",
-    "KEYS: SPACE wave/pause  u upgrade  s sell  a auto",
-    "      hjkl/arrows+ENTER cursor  + - speed  Ctrl-P log",
-    "      R restart",
-    "",
-    "MONSTERS: r rat k kobold a ant o orc Z zombie",
-    "          T troll (regen!)  D dragon (boss)",
+    "MONSTERS: r rat  a ant  b bat (flies!)  k kobold  o orc",
+    "  & demon (splits!)  Z zombie  T troll (regen!)  D dragon",
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }
@@ -1051,7 +1093,8 @@ window.addEventListener("keydown", (e) => {
 window.YATD = { buildTower, upgradeTower, sellTower, startWave, resetGame,
                 buildable, trapPlaceable, towerAt, path, map,
                 getEntrance: () => ENTRANCE, getExit: () => EXIT,
-                getFlow: () => G.flow, wouldSealPath };
+                getFlow: () => G.flow, getFlowFly: () => G.flowFly,
+                wouldSealPath };
 
 /* ---------- main loop ---------- */
 let last = performance.now(), acc = 0;

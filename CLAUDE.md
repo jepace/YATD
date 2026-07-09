@@ -48,13 +48,28 @@ The `<script>` is organized top-to-bottom in sections (marked with
 3. **Data tables** — `TOWERS` (1–4, keyed by hotkey; glyphs are always
    NetHack object-class punctuation — `/` `0` `{` `^` — never a letter,
    since letters are reserved for monsters), `MONSTERS` (keyed by
-   their map glyph: `r k a o Z T D`). `WAVES` is regenerated per game by
-   `genWaves()`: each wave spends a point budget (~8×1.5^(w−1), ±15%) on
-   1–3 monster types from a pool gated by minimum wave (`min`); wave 10
-   always appends the dragon. `waveHpScale(w)` scales monster HP per wave
-   — but NOT the boss (`m.boss` → flat HP), or random short paths make
-   wave 10 unwinnable. **Balance lives in these tables and `genWaves`'s
-   budget curve** — tune there, not in the logic.
+   their map glyph: `r a b k o & Z T D`). Two monster flags interact with
+   the pathfinding/combat systems: `flies: true` (currently only the bat)
+   makes a creep use `G.flowFly` instead of `G.flow` — see the
+   pathfinding note below, this is the counter to a turtled tower maze,
+   it ignores blocking towers entirely (still stopped by rock/walls);
+   `splits: true` + `splitChance`/`splitHpFrac` (currently only the
+   demon) spawns a weaker copy of itself on death via `spawnChild()`,
+   which sets `child: true` on the copy so it can't chain-split. `WAVES`
+   is regenerated per game by `genWaves()`: each wave spends a point
+   budget (~8×1.5^(w−1), ±15%) on 1–3 monster types from a pool gated by
+   minimum wave (`min`); wave 10 always appends the dragon. `waveHpScale(w)`
+   scales monster HP per wave — but NOT the boss (`m.boss` → flat HP), or
+   random short paths make wave 10 unwinnable. **Balance lives in these
+   tables and `genWaves`'s budget curve** — tune there, not in the logic.
+   The Wand of Striking tower (`TOWERS[1]`) has limited `maxCharges`,
+   scaling with level via `towerMaxCharges(t)` (×1.5 per level) and
+   regenerating passively at `CHARGE_REGEN` charges/sec even while off
+   cooldown or mid-wave; enchanting a wand (`upgradeTower`) refills it to
+   its new max. A depleted wand renders dimmed (`empty` check in the
+   tower draw loop) and simply stops firing — `updateTowers` `continue`s
+   past it without resetting `t.cd`, so it fires again the instant a
+   charge trickles back in.
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
    `?` scroll of fireball (`r`, 45 dmg to all), `!` potion of haste
    (`q`, towers 2× rate 8s via `G.hasteUntil`), `/` wand of cold
@@ -87,6 +102,16 @@ The `<script>` is organized top-to-bottom in sections (marked with
    (`blocks: false`) never triggers this check — it's flush with the
    floor, monsters walk over it, `trapPlaceable` doesn't care about
    connectivity.
+
+   `computeFlow(extraBlocked, ignoreTowerBlocks)`'s second argument
+   produces `G.flowFly` — computed once per level in `resetGame()` (not
+   recomputed on every build/sell, since it's static: flying creeps
+   ignore every tower, so it only ever depends on the fixed rock/wall
+   layout). `creepFlow(c)` picks `G.flowFly` vs `G.flow` per creep based
+   on `MONSTERS[c.type].flies`; both `advanceTarget()` and
+   `creepProgress()` go through it so a flying creep is fully consistent
+   end to end (movement, targeting priority) without touching any other
+   code path.
 
    Creeps move cell-to-cell: `c.x,c.y` = current cell, `c.nx,c.ny` = the
    cell they're already committed to stepping into (from
@@ -179,16 +204,16 @@ where static reading genuinely can't tell you the outcome (new physics/
 collision math, procedural generation quality, anything touching win/
 loss balance). When that's asked for:
 
-`window.G` (live state, including `G.flow`) and `window.YATD` (API:
-`buildTower`, `upgradeTower`, `sellTower`, `startWave`, `resetGame`,
+`window.G` (live state, including `G.flow`/`G.flowFly`) and `window.YATD`
+(API: `buildTower`, `upgradeTower`, `sellTower`, `startWave`, `resetGame`,
 `buildable`, `trapPlaceable`, `towerAt`, `path`, `map`, `wouldSealPath`,
-`getEntrance()`, `getExit()`, `getFlow()`) are exposed as test hooks —
-keep them working. `getEntrance`/`getExit`/`getFlow` are functions, not
-plain properties, because `ENTRANCE`/`EXIT`/`G.flow` are wholesale
-*reassigned* (not mutated) on every `resetGame()` — a plain property
-snapshot at export time would go stale after the first game. Verify
-with headless Chromium (Playwright); this pattern works in the Claude
-Code cloud environment:
+`getEntrance()`, `getExit()`, `getFlow()`, `getFlowFly()`) are exposed as
+test hooks — keep them working. `getEntrance`/`getExit`/`getFlow`/
+`getFlowFly` are functions, not plain properties, because
+`ENTRANCE`/`EXIT`/`G.flow`/`G.flowFly` are wholesale *reassigned* (not
+mutated) on every `resetGame()` — a plain property snapshot at export
+time would go stale after the first game. Verify with headless Chromium
+(Playwright); this pattern works in the Claude Code cloud environment:
 
 ```js
 chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
@@ -223,8 +248,9 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 
 - NetHack voice everywhere: messages read like NetHack ("You feel a
   draft...", zorkmids for gold, tombstone on death). Monsters are letter
-  glyphs with classic meanings; keep new ones consistent (`;` eel, `&`
-  demon, `L` lich...).
+  glyphs with classic meanings; keep new ones consistent with real
+  NetHack (`;` eel, `L` lich, `x` grid bug...) — `&` demon is already
+  taken (splits on death, see section 3).
 - Colors: phosphor-green baseline (`#3d6b3d` floors, `#50ff96` accents);
   monsters/towers get muted CRT-friendly colors, full white reserved for
   hit-flash.

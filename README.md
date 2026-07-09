@@ -39,10 +39,15 @@ ever ambiguous about what it is.
 
 | Key | Glyph | Tower            | Cost | What it does                          |
 |-----|-------|------------------|------|---------------------------------------|
-| `1` | `/`   | Wand of Striking | $10  | Fast single-target bolts               |
+| `1` | `/`   | Wand of Striking | $10  | Fast single-target bolts, limited charges |
 | `2` | `0`   | Acid Blob        | $25  | Lobbed splash damage                   |
 | `3` | `{`   | Frost Fountain   | $20  | Chills and slows monsters in range     |
 | `4` | `^`   | Fire Trap        | $15  | Burns monsters — place ON the corridor |
+
+The Wand of Striking runs on charges — it fires until it's dry, then
+sits idle (dimmed on the map) recharging slowly on its own. Enchanting
+it (`u`) tops it back up and raises its max charges. It's the cheapest
+tower for a reason; don't rely on a wall of wands alone to carry a wave.
 
 Every tower except the fire trap needs a clear line of sight — thick
 walls block shots, so a tower can't hit monsters marching down the
@@ -61,7 +66,9 @@ Towers can be enchanted twice (`u`) for more damage and range, or sold
 
 ## Monsters
 
-`r` sewer rat · `k` kobold · `a` giant ant · `o` orc · `Z` zombie ·
+`r` sewer rat · `a` giant ant · `b` cave bat (**flies over your
+towers** — the counter to turtling behind a wall) · `k` kobold · `o` orc
+· `&` demon (splits into a weaker copy when killed) · `Z` zombie ·
 `T` troll (regenerates!) · `D` red dragon (the boss)
 
 ## Controls
