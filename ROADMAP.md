@@ -19,6 +19,31 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Siege monsters, trap disarming, player XP levels, and monster lore.**
+  Four related additions in one pass:
+  - Tower-smashing monsters (`siege: true` — orc captain, troll/troll
+    chieftain, ogre, horned devil) chip `SIEGE_DPS` off any adjacent
+    non-wall blocking tower's own `siegeHp` pool, the counter to a "pipe
+    of death" corridor that's permanently safe once built. Trap-disarming
+    monsters (`disarms: true` — gnome, dwarf) do the same to a fire
+    trap's `trapHp` by standing on it instead of triggering it. Both live
+    in `updateSiege(dt)` — see `CLAUDE.md` section 3.
+  - Player level (`G.plevel`, shown as `Lv:N`) is now the real cap on
+    tower enchantment, separate from gold — earned via kill XP
+    (`gainXp()`, `PLAYER_XP_THRESHOLDS`), announced with its own
+    pause-for-SPACE message like a boss kill. `MAX_LVL` is still the
+    absolute ceiling; `playerMaxTowerLvl()` is `min(MAX_LVL, G.plevel)`.
+  - Click any monster (`G.lore`, `setLore()`/`drawLore()`) to read its
+    name, stats, special-ability flags, and a line of NetHack flavor
+    text — the dragon's lore is color-specific and re-picked with the
+    rest of `DRAGON_COLORS` each level.
+  - A damage source that's fully absorbed by elemental immunity now
+    messages the player the first time it happens per creep ("The fire
+    bounces off its thick scales!") instead of silently doing nothing.
+  - Also: `SPACE` now closes the inventory/log/help overlay (and the new
+    lore popup), not just `Escape`; Wand of Striking's cost went from $10
+    to $18 (it was priced under the $8 Dirt Wall despite being an actual
+    attack tower, making it strong enough to solo a run).
 - **~30-monster roster with per-dungeon-level gating.** `MONSTERS` grew
   from 11 entries to ~30, now keyed by an id string with its own `ch`
   (glyph), decoupled from the key — several tiers share a letter the way

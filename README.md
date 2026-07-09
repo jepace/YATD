@@ -54,7 +54,7 @@ ever ambiguous about what it is.
 
 | Key | Glyph | Tower             | Cost | What it does                          |
 |-----|-------|-------------------|------|---------------------------------------|
-| `1` | `/`   | Wand of Striking  | $10  | Fast single-target bolts, limited charges |
+| `1` | `/`   | Wand of Striking  | $18  | Fast single-target bolts, limited charges |
 | `2` | `0`   | Acid Blob         | $25  | Lobbed splash damage                   |
 | `3` | `{`   | Frost Fountain    | $20  | Chills and slows monsters in range     |
 | `4` | `^`   | Fire Trap         | $15  | Burns monsters — place ON the corridor |
@@ -94,9 +94,20 @@ The fire trap is the odd one out — it lies flush with the floor, doesn't
 block anything, and only goes directly on a corridor or doorway tile
 where something will actually walk over it.
 
+Every tower except the fire trap can also be smashed by the right kind
+of monster — a corridor lined solid with towers isn't automatically
+permanent. A handful of brutish monsters (see below) will chip away at
+any tower standing next to them, same as they would a dirt wall, until
+it's destroyed with no refund. And the fire trap, powerful as it is, has
+its own weakness: a couple of monster types know how to disarm one by
+simply standing on it.
+
 Towers can be enchanted up to level 4 (`u`) for more damage, range,
 (wands) charges, or (the wall) HP, or sold (`s`) for a 70% refund
 (destroyed walls give nothing back, since there's nothing left to sell).
+Enchanting is also capped by your **player level** (see Monsters below,
+"gaining experience") — a fresh player level 1 can't push any tower past
+L1 even with gold to spare.
 
 ## Monsters
 
@@ -116,11 +127,27 @@ entirely, the counter to turtling behind a wall), **submerging** (giant
 eel, kraken — periodically untargetable by everything except a scroll
 of fireball, and always electricity-immune), **splitting** (demon,
 horned devil — spawns a weaker copy of itself on death, and is always
-fire-immune), and **fast regeneration** (troll, troll chieftain, ghoul,
-lich — leave one half-dead and it won't stay that way for long). `D`
-the dragon is always the wave-10 boss, tougher on every dungeon level,
-and its color (and matching elemental immunity) is re-rolled fresh each
-level — see below.
+fire-immune), **fast regeneration** (troll, troll chieftain, ghoul,
+lich — leave one half-dead and it won't stay that way for long),
+**tower-smashing** (orc captain, troll/troll chieftain, ogre, horned
+devil — will destroy any tower it stands next to, given time), and
+**trap-disarming** (gnome, dwarf — will disable a fire trap they're
+standing on instead of triggering it). `D` the dragon is always the
+wave-10 boss, tougher on every dungeon level, and its color (and
+matching elemental immunity) is re-rolled fresh each level — see below.
+
+**Click any monster to read its lore** — name, stats, special
+abilities, and a line of NetHack-style flavor text, including which
+element the current dragon resists. Attacking a monster with damage
+it's immune to shows a message the first time it happens ("The fire
+bounces off its thick scales!") so you're not left guessing why your
+damage numbers stopped moving.
+
+**Gaining experience:** killing monsters earns XP (same amount as their
+gold bounty) toward your **player level**, shown as `Lv:N` in the status
+bar. Player level, not gold, is the real cap on how far you can enchant
+a tower — reaching a new one is announced with its own pause-for-SPACE
+message, same treatment as a boss kill.
 
 Every monster heals a little when left alone — like a tower recharging,
 chip damage that isn't followed up gets undone over time. It's slow
@@ -149,7 +176,8 @@ the clock while deciding what to build.
 
 - **Mouse** — click a tile to open its menu, click an option line to run
   it, click elsewhere to switch tiles, click the same tile again (or
-  `Escape`) to close it.
+  `Escape`) to close it. Click a monster instead of a tile to read its
+  lore.
 - `hjkl`/`yubn`/arrows move a keyboard cursor, `ENTER` opens/closes the
   menu for the cursor's tile — full keyboard play, no mouse required.
 - While a menu is open: press the number shown for a build option, `u`
@@ -158,8 +186,9 @@ the clock while deciding what to build.
   sale); building closes it.
 - `SPACE` — starts the wave while building; pauses/resumes time once a
   wave is underway (a `--More--` prompt, NetHack's own wording, means
-  the game is waiting on you specifically — wave-clears and boss kills
-  both stop for it).
+  the game is waiting on you specifically — wave-clears, boss kills, and
+  player level-ups all stop for it). Also closes the inventory/log/help
+  overlay or the monster lore popup, same as `Escape`.
 - `r` read scroll · `q` quaff potion · `z` zap wand of cold · `c` zap
   wand of charging · `i` inventory. Reading the scroll or zapping the
   cold wand arms a targeted deploy — see Items above.

@@ -203,6 +203,69 @@ The `<script>` is organized top-to-bottom in sections (marked with
    (and pass it) or is physical (and doesn't) — the point of dragon
    immunity is that no single tower trivializes every level's boss, so a
    new AoE/instant-hit effect that forgets to type itself defeats that.
+   A hit fully absorbed by immunity also shows a message the *first*
+   time it happens to a given creep (`c.immuneMsgShown`, keyed per-creep
+   not per-monster-type, so a fresh dragon on the next level gets its own
+   first-hit message again) — flavor text keyed by `dtype` in
+   `IMMUNE_FLAVOR` (e.g. "The fire bounces off its thick scales!"), not
+   by monster, since it's the damage type failing, not the monster doing
+   anything special. Only the first hit messages; every hit after that
+   stays silent so a tower firing every `cd` tick doesn't spam the
+   message line.
+
+   **Siege monsters and trap disarming** are the counters to a "pipe of
+   death" — a maze corridor lined solid with towers that, once built, is
+   otherwise permanently safe. `siege: true` (orc captain, troll/
+   chieftain, ogre, horned devil) lets a monster chip `SIEGE_DPS` off any
+   orthogonally-adjacent *non-wall* blocking tower's `siegeHp` — a
+   separate durability pool from the wall's own `hp`, since walls are
+   already choppable by any creep and are meant to be the cheap
+   sacrificial option; other towers needed their own field so a plain
+   rat can't accidentally start whittling down a Wand of Lightning.
+   `disarms: true` (gnome, dwarf) lets a monster standing directly on a
+   fire trap (contact, not adjacency — traps don't block, so a monster
+   can be on the exact same cell) wear down its `trapHp` at
+   `DISARM_DPS` instead of triggering it. Both mechanics live in one
+   function, `updateSiege(dt)` (called from `update()` right after
+   `updateWalls(dt)`), dispatching on which field (`spec.siegeHp` vs
+   `spec.trapHp`) a tower has; reaching 0 destroys the tower with no
+   refund, same as a wall crumbling — siege recomputes `G.flow` since the
+   tile becomes walkable again, disarming doesn't since traps never
+   blocked movement. `buildTower`/`upgradeTower`/`useCharge` (wand of
+   charging) all treat `siegeHp`/`trapHp` exactly like `hp`/`maxCharges`
+   already were — initialize on build, refill on enchant, eligible for a
+   charging-wand dice roll — so a new destructible resource on a tower
+   doesn't need a fourth copy of that logic, just one more `if`.
+
+   **Monster lore popup:** clicking a live creep (when the tile has no
+   tower — a tower's own upgrade/sell menu takes priority, e.g. a flying
+   creep sharing a tower's cell) opens `G.lore` (a monster type key) via
+   `setLore()`, which auto-pauses like an overlay. `drawLore()` renders
+   the monster's `MONSTERS[type].lore` flavor text (word-wrapped by
+   `wrapText()`) plus a stat/flag line (hp/spd/bounty and any of
+   flies/submerges/splits/siege/disarms/regen/immuneTo it has). It's
+   treated as a modal like the three big overlays (Escape or SPACE closes
+   it and swallows every other key) rather than a lightweight popup like
+   the tile-action menu, since there's nothing else useful to do while
+   it's open. The dragon's `lore` field is mutated by `pickDragon()`
+   alongside `name`/`fg`/`immuneTo` (see `DRAGON_COLORS`, each color
+   entry carries its own `lore` string) so the popup always describes
+   *this* level's dragon color, not a stale one from a previous descent.
+
+   **Player level gates tower enchantment**, independent of gold:
+   `G.plevel` (1–4) is computed from cumulative kill XP
+   (`PLAYER_XP_THRESHOLDS`, `playerLevelForXp()`) via `gainXp()`, called
+   from `damageCreep()`'s kill branch with `m.bounty` as the XP amount —
+   deliberately called *last* in that branch (after the kill/boss
+   message) so a level-up's own `--More--` message wins over the kill
+   message rather than being immediately overwritten by it.
+   `playerMaxTowerLvl()` (`Math.min(MAX_LVL, G.plevel)`) is the real cap
+   `upgradeTower()` enforces; `MAX_LVL` itself never changes and is still
+   the absolute ceiling once `G.plevel` catches up to it. A player level
+   1 game can't enchant ANY tower past L1 even sitting on a full
+   treasury — gold buys towers, XP (from actually fighting) buys the
+   right to improve them. Like `G.gold`/`G.score`, `G.xp`/`G.plevel`
+   persist across `descend()` and only reset in `resetGame()`.
 
 4. **Game state** — the global `G` object (also `window.G` for tests).
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
@@ -233,6 +296,10 @@ The `<script>` is organized top-to-bottom in sections (marked with
    it from resolving `descend()`/`won` before the player ever sees the
    pause. If you add another mid-`update()` pause trigger, it needs the
    same guard or it'll be invisible one frame out of every game.
+   `gainXp()`'s player-level-up message (see section 3) uses this exact
+   same direct-`G.paused = true` + `--More--` pattern for the same
+   reason — it's also reached from inside `damageCreep()`, deep in
+   `updateTowers()`.
 
    **Pathfinding (maze-building TD, not a fixed-path TD):** most towers
    (`TOWERS[n].blocks === true` — everything except the fire trap)
@@ -355,23 +422,29 @@ The `<script>` is organized top-to-bottom in sections (marked with
    The menu is a lightweight popup, not a modal: unmatched keys fall
    through to the rest of `keydown` while it's open (so `hjkl` cursor
    movement, item hotkeys, etc. keep working), unlike the three big
-   overlays (`help`/`inv`/`log`, toggled by `?`/`i`/`Ctrl-P`), which
-   genuinely swallow everything else and are checked earlier in
-   `keydown` for that reason. `Escape` closes whichever of overlay/menu
-   is open; a click always tries the overlay first (closes it without
-   also opening a menu — a second click is needed to actually open one).
+   overlays (`help`/`inv`/`log`, toggled by `?`/`i`/`Ctrl-P`) and the
+   monster lore popup (`G.lore`, see section 3), which genuinely swallow
+   everything else and are checked earlier in `keydown` for that reason.
+   `Escape` OR `SPACE` closes whichever overlay/lore popup is open (real
+   NetHack itself uses SPACE to dismiss `--More--`, so it reads naturally
+   here); `Escape` alone closes the menu (SPACE keeps its other meanings
+   there — see below — since the menu is a lightweight popup, not a
+   modal). A click always tries the overlay/lore popup first (closes it
+   without also opening a menu or triggering whatever's under the
+   cursor) — a second click is needed to actually open a menu.
 
-   **Opening an overlay, the menu, or a targeting arm auto-pauses a
-   running wave**, and closing/resolving/cancelling it auto-resumes —
-   `setOverlay(name)`/`setMenu(m)`/`setTargeting(t)` are the only correct
-   way to mutate `G.overlay`/`G.menu`/`G.targeting`; they call
+   **Opening an overlay, the menu, a targeting arm, or the lore popup
+   auto-pauses a running wave**, and closing/resolving/cancelling it
+   auto-resumes — `setOverlay(name)`/`setMenu(m)`/`setTargeting(t)`/
+   `setLore(type)` are the only correct way to mutate
+   `G.overlay`/`G.menu`/`G.targeting`/`G.lore`; they call
    `autoPause()`/`autoResume()` on the open/close transition. Never
-   assign `G.overlay =` / `G.menu =` / `G.targeting =` directly.
+   assign any of those four fields directly.
    `G.autoPaused` tracks *why* it's paused so a manual `SPACE` pause (or
-   a boss-kill pause, see section 4) is never silently undone by closing
-   a menu/targeting arm that happened to also be open — `autoResume()`
-   only un-pauses if `G.autoPaused` is true, i.e. WE were the one who
-   paused it.
+   a boss-kill or player-level-up pause, see section 4 / section 3) is
+   never silently undone by closing a menu/targeting arm/lore popup that
+   happened to also be open — `autoResume()` only un-pauses if
+   `G.autoPaused` is true, i.e. WE were the one who paused it.
 
    Bindings mirror NetHack where one exists (`r`ead, `q`uaff, `z`ap,
    `i`nventory, `Ctrl-P` message log); `h j k l y u2 b n` are cursor
@@ -379,9 +452,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
    the menu's upgrade/sell, not diagonal cursor movement, so avoid
    reusing those two letters for anything else). `SPACE` is contextual:
    `startWave()` while `G.state === "build"`, otherwise toggles
-   `G.paused` — except it's a no-op while `(G.menu || G.targeting) &&
-   G.autoPaused` is true, since pause state is governed by the open
-   menu/targeting arm in that case, not by SPACE.
+   `G.paused` — except it's a no-op while `(G.menu || G.targeting ||
+   G.lore) && G.autoPaused` is true, since pause state is governed by
+   the open menu/targeting arm/lore popup in that case, not by SPACE.
 
 8. **Main loop** — fixed-timestep (`STEP = 1/60`) accumulator inside
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put

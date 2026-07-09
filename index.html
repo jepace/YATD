@@ -330,34 +330,67 @@ const TERRAIN_COLOR = {
 // `blocks: true` towers physically occupy their tile -- monsters route
 // around them (see computeFlow). The fire trap is flush with the floor
 // and never blocks; monsters walk over it and trigger it on contact.
+// `siegeHp` (bolt/splash/slow/chain towers) is a separate durability pool
+// from the wall's `hp` -- only a `siege: true` monster can chip at it (see
+// MONSTERS below and updateSiege()), unlike the wall, which any adjacent
+// creep chips just by touching it. This is the counter to a "pipe of
+// death" corridor: a maze that's 100% safe from melee once built no
+// longer stays that way once a siege-flagged monster reaches it.
 const TOWERS = {
-  1: { ch: "/", name: "Wand of Striking", cost: 10, dmg: 5, range: 5.0, cd: 0.55,
-       kind: "bolt", blocks: true, maxCharges: 25, fg: "#e8e850",
+  1: { ch: "/", name: "Wand of Striking", cost: 18, dmg: 5, range: 5.0, cd: 0.55,
+       kind: "bolt", blocks: true, maxCharges: 25, siegeHp: 30, fg: "#e8e850",
        desc: "cheap, quick bolts; runs low on charges, recharges slowly" },
   2: { ch: "0", name: "Acid Blob", cost: 25, dmg: 7, range: 4.0, cd: 1.2,
-       kind: "splash", blocks: true, splash: 1.6, fg: "#50e850",
+       kind: "splash", blocks: true, splash: 1.6, siegeHp: 45, fg: "#50e850",
        desc: "lobs acid; splash damage" },
   3: { ch: "{", name: "Frost Fountain", cost: 20, dmg: 2, range: 3.5, cd: 0.7,
-       kind: "slow", blocks: true, slow: 0.5, slowDur: 2.0, fg: "#50c8e8",
+       kind: "slow", blocks: true, slow: 0.5, slowDur: 2.0, siegeHp: 35, fg: "#50c8e8",
        desc: "chills and slows nearby monsters" },
   4: { ch: "^", name: "Fire Trap", cost: 15, dmg: 14, range: 0, cd: 0.5,
-       kind: "trap", blocks: false, fg: "#e85050",
-       desc: "burns monsters standing on it (place ON the corridor)" },
+       kind: "trap", blocks: false, trapHp: 12, fg: "#e85050",
+       desc: "burns monsters standing on it (place ON the corridor) -- can be disarmed" },
   5: { ch: "\\", name: "Wand of Lightning", cost: 30, dmg: 6, range: 4.5, cd: 0.9,
        kind: "chain", blocks: true, maxCharges: 12, chainCount: 2, chainRange: 3.5,
-       chainFalloff: 0.6, fg: "#c8f0ff",
+       chainFalloff: 0.6, siegeHp: 50, fg: "#c8f0ff",
        desc: "arcs to 2 more targets; limited charges, recharges slowly" },
   6: { ch: "%", name: "Dirt Wall", cost: 8, range: 0, cd: 0,
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
 const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
+// player level gates how far ANY tower can be enchanted, independent of
+// gold -- a fresh player level 1 can only bring towers to L1 even with
+// gold to spare, same as MAX_LVL always has, but now MAX_LVL is only
+// reachable once G.plevel itself reaches it. XP is earned per kill
+// (gainXp, called from damageCreep) and persists across a descend() the
+// same way G.gold/G.score do -- resetGame() is the only place it resets.
+const PLAYER_XP_THRESHOLDS = [0, 60, 180, 400]; // cumulative xp for player level 1,2,3,4
+function playerLevelForXp(xp) {
+  let lvl = 1;
+  for (let i = 1; i < PLAYER_XP_THRESHOLDS.length; i++) if (xp >= PLAYER_XP_THRESHOLDS[i]) lvl = i + 1;
+  return lvl;
+}
+const playerMaxTowerLvl = () => Math.min(MAX_LVL, G.plevel);
+function gainXp(amount) {
+  G.xp += amount;
+  const lvl = playerLevelForXp(G.xp);
+  if (lvl > G.plevel) {
+    G.plevel = lvl;
+    message("You feel more experienced!  (player level " + G.plevel +
+      " -- towers can enchant to L" + G.plevel + " now)  --More--");
+    G.paused = true;
+  }
+}
 // gold buys less the deeper you go -- zorkmids you're still carrying at
 // Dlvl 5 shouldn't be worth what they were on Dlvl 1
 const towerCost = (type) => Math.round(TOWERS[type].cost * Math.pow(1.18, G.dlvl - 1));
 const upgradeCost = (t) => towerCost(t.type) * (t.lvl + 1);
 const towerMaxHp = (t) => Math.round(TOWERS[t.type].hp * Math.pow(1.5, t.lvl - 1));
-const WALL_DPS = 6;   // how fast an adjacent creep chips a dirt wall down
+const towerMaxSiegeHp = (t) => Math.round(TOWERS[t.type].siegeHp * Math.pow(1.5, t.lvl - 1));
+const towerMaxTrapHp = (t) => Math.round(TOWERS[t.type].trapHp * Math.pow(1.5, t.lvl - 1));
+const WALL_DPS = 6;    // how fast an adjacent creep chips a dirt wall down
+const SIEGE_DPS = 4;   // how fast a siege: true monster chips any other blocking tower
+const DISARM_DPS = 5;  // how fast a disarms: true monster disables a fire trap it's standing on
 const BASE_REGEN = 0.4;   // hp/sec -- every monster heals a little if left alone
 
 // `ch` is the map glyph -- kept separate from the MONSTERS key so several
@@ -370,44 +403,84 @@ const BASE_REGEN = 0.4;   // hp/sec -- every monster heals a little if left alon
 // again). `submerges`: periodically untargetable by every damage source
 // except the fireball scroll (see isSubmerged()). `regen`: hp/sec passive
 // heal, overriding BASE_REGEN (which every monster gets by default).
+// `siege: true` is the counter to a "pipe of death" -- a maze corridor
+// lined solid with towers that, once built, is otherwise permanently
+// safe -- by letting a handful of brutish/martial tiers (orc captain,
+// troll/chieftain, ogre, horned devil) chip SIEGE_DPS off any adjacent
+// non-wall blocking tower's `siegeHp` (see updateSiege()) exactly the
+// way any creep already chips a dirt wall's `hp`; reaching 0 destroys
+// the tower with no refund and recomputes the flow field, same as a
+// wall crumbling. `disarms: true` (gnome, dwarf) lets a monster stand on
+// a fire trap and wear down its `trapHp` at DISARM_DPS instead of
+// triggering it, disabling it with no refund once it reaches 0 --
+// the trap's own answer to "wicked powerful and otherwise permanent."
 const MONSTERS = {
-  rat:      { name: "sewer rat",     ch: "r", hp: 9,   spd: 3.4, bounty: 2,  leak: 1, fg: "#b8825a" },
-  gridbug:  { name: "grid bug",      ch: "x", hp: 5,   spd: 3.6, bounty: 1,  leak: 1, fg: "#c8c850" },
-  ant:      { name: "giant ant",     ch: "a", hp: 8,   spd: 4.0, bounty: 1,  leak: 1, fg: "#d0d050" },
-  jackal:   { name: "jackal",        ch: "d", hp: 12,  spd: 3.8, bounty: 2,  leak: 1, fg: "#c89858" },
-  bat:      { name: "cave bat",      ch: "b", hp: 10,  spd: 4.5, bounty: 3,  leak: 1, fg: "#a050e8", flies: true },
-  kobold:   { name: "kobold",        ch: "k", hp: 18,  spd: 2.2, bounty: 3,  leak: 1, fg: "#e85050" },
+  rat:      { name: "sewer rat",     ch: "r", hp: 9,   spd: 3.4, bounty: 2,  leak: 1, fg: "#b8825a",
+              lore: "A common sewer rat -- more nuisance than threat, but there's rarely just one." },
+  gridbug:  { name: "grid bug",      ch: "x", hp: 5,   spd: 3.6, bounty: 1,  leak: 1, fg: "#c8c850",
+              lore: "Grid bugs can only move along the compass directions. Harmless, mostly a joke." },
+  ant:      { name: "giant ant",     ch: "a", hp: 8,   spd: 4.0, bounty: 1,  leak: 1, fg: "#d0d050",
+              lore: "A giant ant, fast on its feet and rarely alone for long." },
+  jackal:   { name: "jackal",        ch: "d", hp: 12,  spd: 3.8, bounty: 2,  leak: 1, fg: "#c89858",
+              lore: "Jackals hunt in loose packs, yipping as they close in." },
+  bat:      { name: "cave bat",      ch: "b", hp: 10,  spd: 4.5, bounty: 3,  leak: 1, fg: "#a050e8", flies: true,
+              lore: "A cave bat flits erratically overhead -- and straight over your maze." },
+  kobold:   { name: "kobold",        ch: "k", hp: 18,  spd: 2.2, bounty: 3,  leak: 1, fg: "#e85050",
+              lore: "A kobold, small and cowardly alone, but never truly alone." },
 
   eel:      { name: "giant eel",     ch: ";", hp: 30,  spd: 2.0, bounty: 5,  leak: 2, fg: "#50a8e8",
-              submerges: true, immuneTo: "electric" },
-  orc:      { name: "orc",           ch: "o", hp: 42,  spd: 1.8, bounty: 5,  leak: 2, fg: "#e8a050" },
-  gnome:    { name: "gnome",         ch: "G", hp: 20,  spd: 2.6, bounty: 3,  leak: 1, fg: "#78c878" },
-  dwarf:    { name: "dwarf",         ch: "h", hp: 35,  spd: 2.0, bounty: 6,  leak: 2, fg: "#c8a850" },
-  lichen:   { name: "lichen",        ch: "F", hp: 15,  spd: 0.8, bounty: 2,  leak: 1, fg: "#68a868" },
-  spider:   { name: "giant spider",  ch: "s", hp: 22,  spd: 3.0, bounty: 4,  leak: 1, fg: "#8858c8" },
+              submerges: true, immuneTo: "electric",
+              lore: "A giant eel lurks beneath the surface, surfacing only to strike -- lightning won't touch it." },
+  orc:      { name: "orc",           ch: "o", hp: 42,  spd: 1.8, bounty: 5,  leak: 2, fg: "#e8a050",
+              lore: "An orc raider, crude blade in hand, drawn to the smell of gold." },
+  gnome:    { name: "gnome",         ch: "G", hp: 20,  spd: 2.6, bounty: 3,  leak: 1, fg: "#78c878", disarms: true,
+              lore: "A gnome tinkerer -- weak in a fight, but knows exactly how to disarm a trap." },
+  dwarf:    { name: "dwarf",         ch: "h", hp: 35,  spd: 2.0, bounty: 6,  leak: 2, fg: "#c8a850", disarms: true,
+              lore: "A dwarf, pick-axe in hand, unafraid of stone -- or of your traps." },
+  lichen:   { name: "lichen",        ch: "F", hp: 15,  spd: 0.8, bounty: 2,  leak: 1, fg: "#68a868",
+              lore: "A patch of green lichen -- slow and sticky, easy to underestimate." },
+  spider:   { name: "giant spider",  ch: "s", hp: 22,  spd: 3.0, bounty: 4,  leak: 1, fg: "#8858c8",
+              lore: "A giant spider skitters low and quick, hugging the walls." },
 
   demon:    { name: "demon",         ch: "&", hp: 55,  spd: 1.7, bounty: 9,  leak: 2, fg: "#e850e8",
-              splits: true, splitChance: 0.5, splitHpFrac: 0.4, immuneTo: "fire" },
-  zombie:   { name: "zombie",        ch: "Z", hp: 85,  spd: 1.1, bounty: 8,  leak: 2, fg: "#a8b8a8" },
-  orcapt:   { name: "orc captain",   ch: "o", hp: 70,  spd: 1.9, bounty: 10, leak: 2, fg: "#c85050" },
-  wolf:     { name: "wolf",          ch: "d", hp: 45,  spd: 3.5, bounty: 7,  leak: 2, fg: "#8898a8" },
-  vbat:     { name: "vampire bat",   ch: "b", hp: 40,  spd: 5.0, bounty: 8,  leak: 2, fg: "#682858", flies: true },
-  homunc:   { name: "homunculus",    ch: "h", hp: 25,  spd: 2.4, bounty: 4,  leak: 1, fg: "#78a8a8" },
+              splits: true, splitChance: 0.5, splitHpFrac: 0.4, immuneTo: "fire",
+              lore: "A minor demon, fire washes over it harmlessly -- kill it and a weaker copy may claw free of the corpse." },
+  zombie:   { name: "zombie",        ch: "Z", hp: 85,  spd: 1.1, bounty: 8,  leak: 2, fg: "#a8b8a8",
+              lore: "A shambling zombie -- slow, stubborn, and hard to discourage." },
+  orcapt:   { name: "orc captain",   ch: "o", hp: 70,  spd: 1.9, bounty: 10, leak: 2, fg: "#c85050", siege: true,
+              lore: "An orc captain barks orders and isn't shy about smashing what stands in the way." },
+  wolf:     { name: "wolf",          ch: "d", hp: 45,  spd: 3.5, bounty: 7,  leak: 2, fg: "#8898a8",
+              lore: "A wolf runs with the pack, faster and hungrier than any jackal." },
+  vbat:     { name: "vampire bat",   ch: "b", hp: 40,  spd: 5.0, bounty: 8,  leak: 2, fg: "#682858", flies: true,
+              lore: "A vampire bat drains what it bites, fast and flighty, and just as immune to your maze as its lesser cousin." },
+  homunc:   { name: "homunculus",    ch: "h", hp: 25,  spd: 2.4, bounty: 4,  leak: 1, fg: "#78a8a8",
+              lore: "A homunculus, small and quick, more scout than soldier." },
 
-  troll:    { name: "troll",         ch: "T", hp: 150, spd: 1.6, bounty: 15, leak: 3, fg: "#50b8b8", regen: 3 },
-  ogre:     { name: "ogre",          ch: "O", hp: 180, spd: 1.3, bounty: 18, leak: 3, fg: "#a87850" },
-  wraith:   { name: "wraith",        ch: "W", hp: 95,  spd: 2.0, bounty: 12, leak: 2, fg: "#c8c8e8", flies: true },
-  gspider:  { name: "giant spider",  ch: "s", hp: 60,  spd: 3.2, bounty: 10, leak: 2, fg: "#582888" },
-  warg:     { name: "warg",          ch: "d", hp: 90,  spd: 3.6, bounty: 14, leak: 3, fg: "#485868" },
+  troll:    { name: "troll",         ch: "T", hp: 150, spd: 1.6, bounty: 15, leak: 3, fg: "#50b8b8", regen: 3, siege: true,
+              lore: "A troll -- leave it half-dead and it won't stay that way for long. Strong enough to smash a tower, too." },
+  ogre:     { name: "ogre",          ch: "O", hp: 180, spd: 1.3, bounty: 18, leak: 3, fg: "#a87850", siege: true,
+              lore: "An ogre, brutish and strong, more than happy to smash straight through your defenses." },
+  wraith:   { name: "wraith",        ch: "W", hp: 95,  spd: 2.0, bounty: 12, leak: 2, fg: "#c8c8e8", flies: true,
+              lore: "A wraith drifts through solid matter as easily as smoke -- your maze means nothing to it." },
+  gspider:  { name: "giant spider",  ch: "s", hp: 60,  spd: 3.2, bounty: 10, leak: 2, fg: "#582888",
+              lore: "A larger, meaner cousin of the giant spider, no less quick underfoot." },
+  warg:     { name: "warg",          ch: "d", hp: 90,  spd: 3.6, bounty: 14, leak: 3, fg: "#485868",
+              lore: "A warg, the largest and swiftest of the wolf-kin." },
   hdevil:   { name: "horned devil",  ch: "&", hp: 130, spd: 2.0, bounty: 20, leak: 3, fg: "#a81828",
-              splits: true, splitChance: 0.35, splitHpFrac: 0.4, immuneTo: "fire" },
+              splits: true, splitChance: 0.35, splitHpFrac: 0.4, immuneTo: "fire", siege: true,
+              lore: "A horned devil -- like its lesser demon kin, fire does nothing to it, it may leave a copy behind, and it's strong enough to smash a tower." },
 
-  chieftain:{ name: "troll chieftain",ch: "T", hp: 260, spd: 1.7, bounty: 30, leak: 4, fg: "#a8f8f8", regen: 5 },
-  ghoul:    { name: "ghoul",         ch: "Z", hp: 150, spd: 1.4, bounty: 18, leak: 3, fg: "#586858", regen: 2 },
-  felem:    { name: "fire elemental",ch: "e", hp: 140, spd: 2.0, bounty: 22, leak: 3, fg: "#ff8030", immuneTo: "fire" },
+  chieftain:{ name: "troll chieftain",ch: "T", hp: 260, spd: 1.7, bounty: 30, leak: 4, fg: "#a8f8f8", regen: 5, siege: true,
+              lore: "A troll chieftain leads by brute example -- heals faster than almost anything can hurt it, and hits hard enough to smash a tower." },
+  ghoul:    { name: "ghoul",         ch: "Z", hp: 150, spd: 1.4, bounty: 18, leak: 3, fg: "#586858", regen: 2,
+              lore: "A ghoul, undead and patient, slowly knitting itself back together." },
+  felem:    { name: "fire elemental",ch: "e", hp: 140, spd: 2.0, bounty: 22, leak: 3, fg: "#ff8030", immuneTo: "fire",
+              lore: "A fire elemental, wreathed in flame -- fire won't touch it, but cold will." },
   kraken:   { name: "kraken",        ch: ";", hp: 220, spd: 1.8, bounty: 35, leak: 4, fg: "#2868a8",
-              submerges: true, immuneTo: "electric" },
-  lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2 },
+              submerges: true, immuneTo: "electric",
+              lore: "A kraken, the eel's monstrous elder -- submerges at will, and lightning slides right off it." },
+  lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2,
+              lore: "A lich, an undead spellcaster clinging to unlife -- far tougher than it looks." },
 
   // dragon's name/fg/immuneTo are overwritten by pickDragon() at the start
   // of every level -- see DRAGON_COLORS. There's only ever one dragon
@@ -415,22 +488,29 @@ const MONSTERS = {
   // simpler than threading a per-creep override through every render/
   // message site that reads MONSTERS[c.type].
   D: { name: "red dragon", ch: "D", hp: 2200, spd: 0.9, bounty: 150, leak: 20, fg: "#ff5050",
-       boss: true, immuneTo: "fire" },
+       boss: true, immuneTo: "fire",
+       lore: "The dungeon's ancient guardian and this level's boss -- its scales run red, and fire won't so much as singe it." },
 };
 // one is picked at random (seeded, so reproducible per dungeon) for each
 // level's boss -- the point is a hallway of fire traps can't trivialize
-// every dragon fight, since roughly 3 in 4 levels it'll be the wrong element
+// every dragon fight, since roughly 3 in 4 levels it'll be the wrong
+// element. lore is mutated alongside name/fg/immuneTo for the same reason.
 const DRAGON_COLORS = [
-  { name: "red dragon",   fg: "#ff5050", immuneTo: "fire" },
-  { name: "green dragon", fg: "#50e850", immuneTo: "acid" },
-  { name: "blue dragon",  fg: "#50a8ff", immuneTo: "electric" },
-  { name: "white dragon", fg: "#e8f8ff", immuneTo: "cold" },
+  { name: "red dragon",   fg: "#ff5050", immuneTo: "fire",
+    lore: "The dungeon's ancient guardian and this level's boss -- its scales run red, and fire won't so much as singe it." },
+  { name: "green dragon", fg: "#50e850", immuneTo: "acid",
+    lore: "The dungeon's ancient guardian and this level's boss -- its scales run green, and acid slides off it like water." },
+  { name: "blue dragon",  fg: "#50a8ff", immuneTo: "electric",
+    lore: "The dungeon's ancient guardian and this level's boss -- its scales run blue, and lightning arcs harmlessly around it." },
+  { name: "white dragon", fg: "#e8f8ff", immuneTo: "cold",
+    lore: "The dungeon's ancient guardian and this level's boss -- its scales run white, and the cold doesn't touch it at all." },
 ];
 function pickDragon() {
   const v = DRAGON_COLORS[ri(0, DRAGON_COLORS.length - 1)];
   MONSTERS.D.name = v.name;
   MONSTERS.D.fg = v.fg;
   MONSTERS.D.immuneTo = v.immuneTo;
+  MONSTERS.D.lore = v.lore;
 }
 // waves: groups of {t: type, n: count, gap: seconds between spawns}.
 // Regenerated on every new level (Dlvl) by genWaves(dlvl): every wave
@@ -534,6 +614,7 @@ const G = {
   spawnQueue: [], spawnTimer: 0,
   menu: null,                          // { x, y } tile whose action menu is open
   targeting: null,                     // { kind, radius } while aiming a scroll/wand
+  lore: null,                          // creep type key whose lore popup is open
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
@@ -575,6 +656,11 @@ function setTargeting(t) {
   else if (!t && G.targeting) autoResume();
   G.targeting = t;
 }
+function setLore(type) {
+  if (type && !G.lore) autoPause();
+  else if (!type && G.lore) autoResume();
+  G.lore = type;
+}
 
 function resetGame() {
   G.dlvl = 1;
@@ -583,9 +669,9 @@ function resetGame() {
   G.seed = SEED;
   G.inv = { scroll: 0, potion: 0, wand: 0, charge: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
-  G.score = 0; G.kills = 0;
+  G.score = 0; G.kills = 0; G.xp = 0; G.plevel = 1;
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
-  G.spawnQueue = []; G.menu = null; G.targeting = null;
+  G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
@@ -602,7 +688,7 @@ function descend() {
   genWaves(G.dlvl);
   G.wave = 0;
   G.towers = []; G.creeps = []; G.fx = [];
-  G.spawnQueue = []; G.menu = null; G.targeting = null;
+  G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
@@ -703,6 +789,8 @@ function buildTower(type, x, y) {
   const t = { type, x, y, lvl: 1, cd: 0, spent: cost };
   if (spec.maxCharges) t.charges = spec.maxCharges;
   if (spec.hp) t.hp = spec.hp;
+  if (spec.siegeHp) t.siegeHp = spec.siegeHp;
+  if (spec.trapHp) t.trapHp = spec.trapHp;
   G.towers.push(t);
   if (spec.blocks) G.flow = computeFlow();
   message("You conjure a " + spec.name + ".");
@@ -711,11 +799,17 @@ function buildTower(type, x, y) {
 function upgradeTower(t) {
   if (!t) return;
   if (t.lvl >= MAX_LVL) { message("It is already fully enchanted."); return; }
+  if (t.lvl >= playerMaxTowerLvl()) {
+    message("You lack the experience to enchant it further.  (reach player level " + (t.lvl + 1) + ")");
+    return;
+  }
   const cost = upgradeCost(t);
   if (G.gold < cost) { message("Enchanting costs " + cost + " zorkmids; you are short."); return; }
   G.gold -= cost; t.spent += cost; t.lvl++;
   if (TOWERS[t.type].maxCharges) t.charges = towerMaxCharges(t);  // enchanting refills it
   if (TOWERS[t.type].hp) t.hp = towerMaxHp(t);                    // and reinforces a wall
+  if (TOWERS[t.type].siegeHp) t.siegeHp = towerMaxSiegeHp(t);     // and its siege durability
+  if (TOWERS[t.type].trapHp) t.trapHp = towerMaxTrapHp(t);        // and a trap's resistance to disarming
   message("Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")");
 }
 function sellTower(t) {
@@ -745,8 +839,10 @@ function menuOptions(x, y) {
   if (t) {
     const opts = [];
     if (t.lvl < MAX_LVL) {
-      opts.push({ key: "u", label: "Upgrade to L" + (t.lvl + 1) + " ($" + upgradeCost(t) + ")",
-                  action: () => upgradeTower(t), keepOpen: true });
+      const label = t.lvl < playerMaxTowerLvl()
+        ? "Upgrade to L" + (t.lvl + 1) + " ($" + upgradeCost(t) + ")"
+        : "Upgrade to L" + (t.lvl + 1) + " (need player level " + (t.lvl + 1) + ")";
+      opts.push({ key: "u", label, action: () => upgradeTower(t), keepOpen: true });
     }
     opts.push({ key: "s", label: "Sell (+$" + Math.floor(t.spent * 0.7) + ")",
                 action: () => sellTower(t), keepOpen: true });
@@ -771,9 +867,27 @@ function menuLayout(x, y) {
 }
 
 /* ---------- combat ---------- */
+// flavor text for a shrugged-off elemental hit -- keyed by dtype, not by
+// monster, since it describes the damage type failing, not the monster
+const IMMUNE_FLAVOR = {
+  fire: "bounces off its thick scales",
+  cold: "melts away without effect",
+  electric: "arcs harmlessly past it",
+  acid: "does nothing to its hide",
+};
 function damageCreep(c, dmg, dtype) {
   const m0 = MONSTERS[c.type];
-  if (dtype && m0.immuneTo === dtype) { c.hitFlash = 0.1; return; } // shrugs it off entirely
+  if (dtype && m0.immuneTo === dtype) {
+    c.hitFlash = 0.1;
+    // only once per creep -- a tower firing every cd tick would otherwise
+    // spam the message line and bury anything else worth seeing
+    if (!c.immuneMsgShown) {
+      c.immuneMsgShown = true;
+      message("The " + dtype + " " + (IMMUNE_FLAVOR[dtype] || "has no effect") +
+        " on the " + m0.name + "!");
+    }
+    return; // shrugs it off entirely
+  }
   c.hp -= dmg; c.hitFlash = 0.1;
   if (c.hp <= 0 && !c.dead) {
     c.dead = true;
@@ -786,6 +900,7 @@ function damageCreep(c, dmg, dtype) {
     else message("The " + m.name + " is destroyed. (+" + m.bounty + " zorkmids)");
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
+    gainXp(m.bounty); // called last so a level-up's --More-- message wins over the kill message
   }
 }
 // a lesser copy that claws free of a split monster's corpse -- carries
@@ -883,19 +998,24 @@ function useCharge() {
   // like the real thing, this is not a guaranteed full recharge -- each
   // tower gets its own roll (t.lvl dice of d6), so nothing is ever a sure
   // top-off and a level-1 tower barely benefits compared to a level-4 one
+  const roll = (t) => { let r = 0; for (let i = 0; i < t.lvl; i++) r += ri(1, 6); return r; };
   let restored = 0;
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
     if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
-      let roll = 0;
-      for (let i = 0; i < t.lvl; i++) roll += ri(1, 6);
-      t.charges = Math.min(towerMaxCharges(t), t.charges + roll);
+      t.charges = Math.min(towerMaxCharges(t), t.charges + roll(t));
       restored++;
     }
     if (spec.hp && t.hp < towerMaxHp(t)) {
-      let roll = 0;
-      for (let i = 0; i < t.lvl; i++) roll += ri(1, 6);
-      t.hp = Math.min(towerMaxHp(t), t.hp + roll);
+      t.hp = Math.min(towerMaxHp(t), t.hp + roll(t));
+      restored++;
+    }
+    if (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t)) {
+      t.siegeHp = Math.min(towerMaxSiegeHp(t), t.siegeHp + roll(t));
+      restored++;
+    }
+    if (spec.trapHp && t.trapHp < towerMaxTrapHp(t)) {
+      t.trapHp = Math.min(towerMaxTrapHp(t), t.trapHp + roll(t));
       restored++;
     }
   }
@@ -1061,6 +1181,45 @@ function updateWalls(dt) {
   }
 }
 
+// the counter to a "pipe of death": a `siege: true` monster orthogonally
+// adjacent to any non-wall blocking tower chips its `siegeHp` down at
+// SIEGE_DPS (mirrors updateWalls' dirt-wall logic, but gated to a subset
+// of tough/martial monsters instead of every creep); a `disarms: true`
+// monster standing directly on a fire trap chips its `trapHp` down at
+// DISARM_DPS instead of triggering it. Both destroy the tower with no
+// refund once their hp hits 0 -- siege recomputes the flow field since
+// the tile becomes walkable again, disarming doesn't since traps never
+// blocked movement in the first place.
+function updateSiege(dt) {
+  let anyGone = false;
+  for (const t of G.towers) {
+    const spec = TOWERS[t.type];
+    if (spec.siegeHp) {
+      const attacker = G.creeps.some(c =>
+        !c.dead && MONSTERS[c.type].siege &&
+        Math.abs(c.x - t.x) + Math.abs(c.y - t.y) === 1);
+      if (!attacker) continue;
+      t.siegeHp -= SIEGE_DPS * dt;
+      if (t.siegeHp <= 0) { t.gone = true; t.goneMsg = "crumbles under the assault"; anyGone = true; }
+    } else if (spec.trapHp) {
+      const attacker = G.creeps.some(c => {
+        if (c.dead || !MONSTERS[c.type].disarms) return false;
+        const [x, y] = creepCell(c);
+        return x === t.x && y === t.y;
+      });
+      if (!attacker) continue;
+      t.trapHp -= DISARM_DPS * dt;
+      if (t.trapHp <= 0) { t.gone = true; t.goneMsg = "is disarmed"; anyGone = true; }
+    }
+  }
+  if (anyGone) {
+    const gone = G.towers.filter(t => t.gone);
+    G.towers = G.towers.filter(t => !t.gone);
+    if (gone.some(t => TOWERS[t.type].blocks)) G.flow = computeFlow();
+    for (const t of gone) message("The " + TOWERS[t.type].name + " " + t.goneMsg + "!");
+  }
+}
+
 function update(dt) {
   if (G.paused) return;
   G.time += dt;
@@ -1078,6 +1237,7 @@ function update(dt) {
   updateTowers(dt);
   updateCreeps(dt);
   updateWalls(dt);
+  updateSiege(dt);
 
   if (!G.paused && G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
     // wave cleared
@@ -1128,7 +1288,8 @@ function drawGame() {
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
     const empty = spec.maxCharges && Math.floor(t.charges) < 1;
-    const cracked = spec.hp && t.hp < towerMaxHp(t) * 0.4;
+    const cracked = (spec.hp && t.hp < towerMaxHp(t) * 0.4) ||
+                    (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t) * 0.4);
     const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000"][t.lvl] || spec.fg;
     const fg = (empty || cracked) ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
     const picked = G.menu && G.menu.x === t.x && G.menu.y === t.y;
@@ -1172,7 +1333,7 @@ function drawGame() {
                (G.time < G.hasteUntil ? "  [haste]" : "");
   text(0, 22,
     ("Dlvl:" + G.dlvl + "  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
-     G.wave + "/" + WAVES.length + "  Kills:" + G.kills + "  Score:" + G.score +
+     G.wave + "/" + WAVES.length + "  Lv:" + G.plevel + "  Kills:" + G.kills + "  Score:" + G.score +
      spd + auto).padEnd(COLS).slice(0, COLS), "#c8d8b8");
   if (G.paused) {
     const paused = "*** PAUSED ***";
@@ -1189,14 +1350,54 @@ function drawGame() {
       const [x, y] = creepCell(c); return x === hx && y === hy;
     });
     if (c) l2 = "You see: " + MONSTERS[c.type].name + "  HP:" +
-      Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "");
+      Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "") +
+      "   (click for lore)";
   }
   text(0, 23, l2.padEnd(COLS).slice(0, COLS), "#8aa87a");
 
   if (G.overlay === "help") drawHelp();
   else if (G.overlay === "inv") drawInventory();
   else if (G.overlay === "log") drawLog();
+  else if (G.lore) drawLore();
   else if (G.menu) drawMenu();
+}
+// word-wrap a string to fit within `w` columns -- used by drawLore() so
+// hand-written flavor text doesn't need manual line breaks
+function wrapText(s, w) {
+  const words = s.split(" ");
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const next = line ? line + " " + word : word;
+    if (next.length > w) { lines.push(line); line = word; }
+    else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function drawLore() {
+  const m = MONSTERS[G.lore];
+  const w = 56;
+  const bodyLines = wrapText(m.lore || "Not much is known about this creature.", w - 4);
+  const h = bodyLines.length + 5;
+  const x0 = Math.floor((MAPW - w) / 2);
+  const y0 = Math.max(1, Math.min(20 - h, 8));
+  overlayBox(x0, y0, w, h, m.ch + " " + m.name);
+  let row = y0 + 2;
+  const flags = [];
+  if (m.flies) flags.push("flies");
+  if (m.submerges) flags.push("submerges");
+  if (m.splits) flags.push("splits");
+  if (m.siege) flags.push("smashes towers");
+  if (m.disarms) flags.push("disarms traps");
+  if (m.regen) flags.push("fast regen");
+  if (m.immuneTo) flags.push(m.immuneTo + "-immune");
+  const stat = "hp:" + m.hp + "  spd:" + m.spd.toFixed(1) + "  bounty:" + m.bounty +
+    (flags.length ? "  [" + flags.join(", ") + "]" : "");
+  text(x0 + 2, row, stat, "#8aa87a");
+  row += 2;
+  bodyLines.forEach((l, i) => text(x0 + 2, row + i, l, "#c8e8b8"));
+  text(x0 + 2, y0 + h - 1, "click or SPACE to close", "#6a8a6a");
 }
 
 function drawCentered(lines, y0, fg) {
@@ -1229,10 +1430,14 @@ function drawMenu() {
   let row = by0 + 2;
   if (tower) {
     const spec = TOWERS[tower.type];
+    const durability = spec.siegeHp
+      ? "  dur:" + Math.ceil(tower.siegeHp) + "/" + towerMaxSiegeHp(tower)
+      : spec.trapHp ? "  dur:" + Math.ceil(tower.trapHp) + "/" + towerMaxTrapHp(tower) : "";
     const stat = spec.hp
       ? "hp:" + Math.ceil(tower.hp) + "/" + towerMaxHp(tower)
       : "dmg:" + towerDmg(tower) + "  rng:" + towerRange(tower).toFixed(1) +
-        (spec.maxCharges ? "  chg:" + Math.floor(tower.charges) + "/" + towerMaxCharges(tower) : "");
+        (spec.maxCharges ? "  chg:" + Math.floor(tower.charges) + "/" + towerMaxCharges(tower) : "") +
+        durability;
     text(bx0 + 2, row, stat, "#8aa87a");
     row++;
   }
@@ -1250,23 +1455,23 @@ function drawHelp() {
     "--------------------- YATD Help ---------------------",
     "Click a tile (or ENTER on the cursor) for a menu of",
     "what to do there. Monsters route live, no fixed path.",
-    " 1 / Wand of Striking  $10  bolts, limited charges",
+    " 1 / Wand of Striking  $18  bolts, limited charges",
     " 2 0 Acid Blob         $25  splash, blocks, LOS",
     " 3 { Frost Fountain    $20  slows, blocks, LOS",
     " 4 ^ Fire Trap         $15  ON the corridor #, no block",
     " 5 \\ Wand of Lightning $30  arcs to 2 more, limited charges",
     " 6 % Dirt Wall         $8   pure block, hp, no combat",
-    "Most block & need LOS. Enchant up to L" + MAX_LVL + " in the menu.",
+    "Enchant up to L" + MAX_LVL + " in the menu -- capped by Lv (kill XP).",
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",
     "ITEMS: r fire  q haste  z cold  c charge  i inv",
     "KEYS: SPACE wave/pause  a auto  Ctrl-P log  R restart",
     "      hjkl/arrows+ENTER cursor  + - speed",
     "",
-    "~30 monsters, phasing in/out by dungeon level. Some fly",
-    "over towers, submerge, split on death, or regen fast --",
-    "same letter can mean a tougher tier deeper down. D is",
-    "always the wave-10 boss.",
+    "~30 monsters, phasing in/out by dungeon level. Some fly,",
+    "submerge, split, regen fast, smash towers, or disarm",
+    "traps -- click any monster to read its lore. D is always",
+    "the wave-10 boss.",
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }
@@ -1388,6 +1593,24 @@ canvas.addEventListener("mousedown", (e) => {
   // else -- a click anywhere on the map picks the impact point
   if (G.targeting) { resolveTargeting(x, y); return; }
 
+  // a lore popup, like an overlay, absorbs the click that closes it
+  // rather than also opening whatever's underneath
+  if (G.lore) { setLore(null); return; }
+
+  // clicking a tile with a live creep on it (and no tower -- a tower's
+  // upgrade/sell menu takes priority, e.g. a flying creep sharing a
+  // tower's cell) shows that monster's lore instead of the build menu a
+  // creep-occupied buildable tile would otherwise show (which would just
+  // read "Nothing can be built here" anyway, since occupied tiles aren't
+  // buildable)
+  if (!towerAt(x, y)) {
+    const c = G.creeps.find(c => {
+      const [cx, cy] = creepCell(c);
+      return !c.dead && cx === x && cy === y;
+    });
+    if (c) { setLore(c.type); return; }
+  }
+
   // a click inside the currently-open menu's box runs whichever option
   // line it landed on (or does nothing, if it hit the title/border/
   // footer rather than an option) -- either way it does NOT also
@@ -1437,7 +1660,16 @@ window.addEventListener("keydown", (e) => {
     setOverlay(G.overlay === "log" ? null : "log");
     return;
   }
-  if (G.overlay) { if (e.key === "Escape") setOverlay(null); return; }
+  // SPACE closes an overlay too, not just Escape -- NetHack itself uses
+  // SPACE to dismiss things (--More--), so it reads naturally here; the
+  // menu/targeting arm below keep SPACE's other meanings (pause toggle,
+  // wave start) since they're lightweight popups, not a modal overlay
+  if (G.overlay) { if (e.key === "Escape" || e.key === " ") setOverlay(null); return; }
+
+  // the monster lore popup (opened by clicking a creep) is a modal like
+  // the overlays above, not a lightweight popup like the menu -- Escape
+  // or SPACE dismiss it and swallow everything else
+  if (G.lore) { if (e.key === "Escape" || e.key === " ") setLore(null); return; }
 
   // targeting (a scroll/wand being aimed): Escape cancels without
   // consuming the item, ENTER on the cursor confirms the impact point --
@@ -1466,7 +1698,7 @@ window.addEventListener("keydown", (e) => {
 
   switch (e.key) {
     case " ":
-      if ((G.menu || G.targeting) && G.autoPaused) return; // pause state is governed by the open menu/targeting, not SPACE
+      if ((G.menu || G.targeting || G.lore) && G.autoPaused) return; // pause state is governed by the open menu/targeting/lore, not SPACE
       if (G.state === "build") { startWave(); return; }
       if (G.state === "wave") {
         G.paused = !G.paused;
