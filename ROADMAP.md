@@ -4,66 +4,51 @@ Ideas from the original build session, roughly ordered by
 bang-for-the-buck. Each should keep the one-file, zero-dependency,
 NetHack-voiced constraints described in `CLAUDE.md`.
 
-**Already shipped since v1:** pause (now `SPACE` while a wave is running;
-starts the wave when in build phase), procedural dungeon generation
-(seeded, `?seed=N`), randomized wave composition (`genWaves` budget
-system), random item drops (scroll of fireball / potion of haste / wand
-of cold / gold piles) with an `i` inventory overlay, a `Ctrl-P` message
-log (NetHack-style — replaced the old floating "+2$" combat text
-entirely; all events are `message()` calls now), non-sticky tower
-placement (`1`-`4` must be pressed again before each build), creep lane
-variation in rooms (`jit`), line-of-sight for ranged towers
-(`hasLineOfSight`, walls block shots — traps are exempt), and **live
-maze-building pathfinding**: towers 1-3 physically block their tile and
-monsters route around them via a BFS flow field recomputed on every
-build/sell (`computeFlow`/`G.flow`), with `wouldSealPath` refusing any
-placement that would wall the stairs shut entirely. See `CLAUDE.md`
-section 4 before touching monster movement or tower placement rules —
-it's easy to introduce a softlock (a wave that can never finish because
-a creep has no route) if you change the connectivity check without
-understanding it first. New item ideas should extend `dropItem()` and
-the `G.inv` + `r/q/z` key pattern. New overlays should follow the
-`G.overlay` + `overlayBox()` pattern in
-`drawHelp`/`drawInventory`/`drawLog` — see `CLAUDE.md` section 6. New
-towers must use NetHack object-class punctuation for their glyph, never
-a letter — letters are exclusively monsters now (see `CLAUDE.md` section
-3); idea below has been updated to match. New blocking towers should
-set `blocks: true` in `TOWERS` and will automatically participate in the
-maze system; non-blocking (contact/aura) towers should set
-`blocks: false` like the fire trap. Also shipped: **limited wand
-charges** (`TOWERS[1].maxCharges`, regenerates passively, refills on
-enchant — the counter to a wall of cheap wands needing zero upkeep),
-**four new monster behaviors** — `x` grid bug (plain filler, weak/fast/
-cheap), `b` cave bat (`flies: true`, ignores every blocking tower via a
-separate `G.flowFly` field, the counter to turtling behind a maze), `;`
-giant eel (`submerges: true`, periodically untargetable — see
-`isSubmerged()` in `CLAUDE.md` section 3), `&` demon (`splits: true`,
-spawns a weaker copy on death via `spawnChild()`) — **a fourth upgrade
-tier** (`MAX_LVL` raised 3→4, with a matching 4th tower-color tier and
-charge-scaling that already extended cleanly since the formulas were
-level-generic), and **multiple dungeon levels**: clearing wave 10 below
-`MAX_DLVL` (5) calls `descend()` — a brand new `genLevel()`/`genWaves()`,
-gold/score/HP carry over, towers don't, difficulty scales up ~1.3x
-budget and ~1.15x HP per level (bosses too). See `CLAUDE.md` section 4
-("Dungeon levels") before touching level-transition logic. Also shipped:
-**two more towers**, `\` Wand of Lightning (`kind: "chain"`, arcs to 2
-more targets, `chainRange`/`chainFalloff` — this used to be idea 7's
-"Lightning rod" suggestion below, now removed from the open list) and
-`%` Dirt Wall (`kind: "wall"`, pure obstacle with `hp` instead of
-`dmg`/`range`, worn down by `updateWalls()` whenever a live creep is
-orthogonally adjacent — see `CLAUDE.md` section 3); **a real bug fix**
-in `creepCell()`'s lane-jitter offset, which used to check only terrain
-and could visually place a grounded creep on top of an adjacent tower
-(never affected leak detection, which reads `c.x,c.y` directly, but did
-affect what got rendered/targeted/collided) — now also checks
-`!towerAt(vx,vy)`; a **render fix** for flying creeps, which
-legitimately CAN share a cell with a tower (that's the point of flying)
-— the creep-render loop now tints the background so it reads as "flying
-over" instead of looking like the same bug; and **universal passive
-regen** (`BASE_REGEN`, 0.4 hp/sec for every monster, `m.regen` still
-overrides it for the troll at 3) — the fairness argument being that a
-tower recharges when it's not firing, so a monster should heal a little
-too when it isn't being focused down.
+**Already shipped since v1** (deep mechanics for all of this are in
+`CLAUDE.md`, not repeated here): procedural dungeon generation (seeded,
+`?seed=N`), randomized wave composition, random item drops with an `i`
+inventory overlay, a `Ctrl-P` message log (all events are `message()`
+calls, no floating combat text), live maze-building pathfinding (towers
+physically block, monsters route around via a BFS flow field,
+`wouldSealPath` refuses any placement that would seal the stairs shut
+entirely), 6 tower types incl. limited wand charges (now on both wands,
+not just the striking one) and a destructible dirt wall, a 4th upgrade
+tier, 6 monster types beyond the original 5 (flying bat, submerging eel,
+splitting demon, grid bug filler) plus universal passive regen, and
+multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
+5, difficulty scaling with depth).
+
+**Most recently shipped:**
+- **Tile-action menu replacing the readied-tool model.** Click a tile
+  (or `ENTER` the cursor onto it) for a popup listing every action legal
+  there — build options, or an existing tower's upgrade/sell. No more
+  "press 1-6 to ready a tool, then click." See `CLAUDE.md` section 7
+  before touching `menuOptions`/`menuLayout`/`menuBox` — rendering and
+  click-hit-testing derive their row math from the same functions on
+  purpose, so they can't disagree about where an option line is.
+- **Auto-pause/resume on any overlay or menu.** `setOverlay`/`setMenu`
+  are the only correct way to open/close one — see `CLAUDE.md` section 7
+  for why (`G.autoPaused` distinguishes an auto-pause from a manual one
+  so closing a menu never steals a `SPACE` pause or a boss-kill pause).
+- **NetHack's real `--More--` convention** for anything the player must
+  consciously dismiss (wave-clear, boss kill) — renders in reverse
+  video, not just appended text.
+- **Boss-kill pause**, `SPACE` to continue — see `CLAUDE.md` section 4
+  for the mid-`update()` hazard this had to guard against.
+- **Elemental damage & dragon immunity.** `damageCreep(c, dmg, dtype)`;
+  fire trap/acid blob/wand of lightning/frost fountain/fireball scroll
+  are typed, wand of striking stays untyped (always effective — that's
+  its whole point now). Demon is always fire-immune, eel always
+  electric-immune. Each level's dragon is a random color with a
+  matching immunity (`pickDragon()`, `DRAGON_COLORS`), so one tower type
+  can no longer trivialize every boss fight.
+- **Wand of charging** (item, `c` to zap) — instantly maxes every
+  tower's charges/HP at once.
+- A real **jitter/tower-occupancy bug fix** (a grounded creep's
+  cosmetic lane-wobble could render it on top of an adjacent tower) and
+  a **render fix** for flying creeps (which legitimately CAN share a
+  cell with a tower — that's the point of flying — now tinted so it
+  reads as "flying over" instead of looking like the same bug).
 
 **Process note:** the user has asked that changes here be verified by
 code review, not by launching a headless browser to click through the
@@ -125,7 +110,8 @@ only) vs. when full browser verification is still warranted.
    boss death and leaks, brief red flash of the status HP when hit.
 10. **Intro/outro flavor.** Randomized NetHack-style level entry messages
     per Dlvl (beyond the current single descend message), an oracle room
-    with hint text, `--More--` prompt for multi-line events.
+    with hint text. (The `--More--` convention itself is shipped — reuse
+    it for these too, don't invent a second "press a key" pattern.)
 11. **Mobile/touch support.** Tap = click already works; add a bottom
     touch toolbar for tower selection and wave start when
     `pointer: coarse`.

@@ -344,9 +344,9 @@ const TOWERS = {
        kind: "trap", blocks: false, fg: "#e85050",
        desc: "burns monsters standing on it (place ON the corridor)" },
   5: { ch: "\\", name: "Wand of Lightning", cost: 30, dmg: 6, range: 4.5, cd: 0.9,
-       kind: "chain", blocks: true, chainCount: 2, chainRange: 3.5, chainFalloff: 0.6,
-       fg: "#c8f0ff",
-       desc: "arcs to 2 more targets after the first, needs LOS per link" },
+       kind: "chain", blocks: true, maxCharges: 12, chainCount: 2, chainRange: 3.5,
+       chainFalloff: 0.6, fg: "#c8f0ff",
+       desc: "arcs to 2 more targets; limited charges, recharges slowly" },
   6: { ch: "%", name: "Dirt Wall", cost: 8, range: 0, cd: 0,
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
@@ -371,14 +371,36 @@ const MONSTERS = {
   a: { name: "giant ant", hp: 8,   spd: 4.0, bounty: 1,  leak: 1,  fg: "#d0d050" },
   b: { name: "cave bat",  hp: 10,  spd: 4.5, bounty: 3,  leak: 1,  fg: "#a050e8", flies: true },
   k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
-  ";": { name: "giant eel", hp: 30, spd: 2.0, bounty: 5, leak: 2,  fg: "#50a8e8", submerges: true },
+  ";": { name: "giant eel", hp: 30, spd: 2.0, bounty: 5, leak: 2,  fg: "#50a8e8",
+         submerges: true, immuneTo: "electric" },
   o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
   "&": { name: "demon",   hp: 55,  spd: 1.7, bounty: 9,  leak: 2,  fg: "#e850e8",
-         splits: true, splitChance: 0.5, splitHpFrac: 0.4 },
+         splits: true, splitChance: 0.5, splitHpFrac: 0.4, immuneTo: "fire" },
   Z: { name: "zombie",    hp: 85,  spd: 1.1, bounty: 8,  leak: 2,  fg: "#a8b8a8" },
   T: { name: "troll",     hp: 150, spd: 1.6, bounty: 15, leak: 3,  fg: "#50b8b8", regen: 3 },
-  D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
+  // D's name/fg/immuneTo are overwritten by pickDragon() at the start of
+  // every level -- see DRAGON_COLORS. There's only ever one dragon alive
+  // at a time (wave 10's lone boss), so mutating the shared entry is
+  // simpler than threading a per-creep override through every render/
+  // message site that reads MONSTERS[c.type].
+  D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050",
+       boss: true, immuneTo: "fire" },
 };
+// one is picked at random (seeded, so reproducible per dungeon) for each
+// level's boss -- the point is a hallway of fire traps can't trivialize
+// every dragon fight, since roughly 3 in 4 levels it'll be the wrong element
+const DRAGON_COLORS = [
+  { name: "red dragon",   fg: "#ff5050", immuneTo: "fire" },
+  { name: "green dragon", fg: "#50e850", immuneTo: "acid" },
+  { name: "blue dragon",  fg: "#50a8ff", immuneTo: "electric" },
+  { name: "white dragon", fg: "#e8f8ff", immuneTo: "cold" },
+];
+function pickDragon() {
+  const v = DRAGON_COLORS[ri(0, DRAGON_COLORS.length - 1)];
+  MONSTERS.D.name = v.name;
+  MONSTERS.D.fg = v.fg;
+  MONSTERS.D.immuneTo = v.immuneTo;
+}
 // waves: groups of {t: type, n: count, gap: seconds between spawns}.
 // Regenerated on every new level (Dlvl) by genWaves(dlvl): every wave
 // gets a point budget (growing ~1.5x per wave, +-15%, and ~1.3x per
@@ -413,7 +435,7 @@ function genWaves(dlvl) {
     const groups = chosen.map(p => ({
       t: p.t, n: Math.max(1, Math.round(budget / nTypes / p.cost)), gap: p.gap,
     }));
-    if (w === 10) groups.push({ t: "D", n: 1, gap: 1 });
+    if (w === 10) { pickDragon(); groups.push({ t: "D", n: 1, gap: 1 }); }
     WAVES.push(groups);
   }
 }
@@ -441,11 +463,11 @@ const G = {
   wave: 0, score: 0, kills: 0,
   towers: [], creeps: [], fx: [], flow: null, flowFly: null,
   spawnQueue: [], spawnTimer: 0,
-  selType: 0, selTower: null,          // 0 = no tool readied
+  menu: null,                          // { x, y } tile whose action menu is open
   cursor: { x: 40, y: 10, on: false },
   hover: { x: -1, y: -1 },
-  speed: 1, autoStart: false, overlay: null, paused: false,
-  inv: { scroll: 0, potion: 0, wand: 0 }, hasteUntil: 0, seed: 0,
+  speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
+  inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
 };
@@ -458,17 +480,38 @@ function message(s) {
   if (G.log.length > 300) G.log.shift();
 }
 
+// opening an overlay or the tile-action menu pauses a running wave (only
+// if it wasn't already paused for some other reason -- G.autoPaused
+// tracks whether WE paused it, so closing only resumes if we're the one
+// who paused it, never stealing a manual pause)
+function autoPause() {
+  if (G.state === "wave" && !G.paused) { G.paused = true; G.autoPaused = true; }
+}
+function autoResume() {
+  if (G.autoPaused) { G.paused = false; G.autoPaused = false; }
+}
+function setOverlay(name) {
+  if (name && !G.overlay) autoPause();
+  else if (!name && G.overlay) autoResume();
+  G.overlay = name;
+}
+function setMenu(m) {
+  if (m && !G.menu) autoPause();
+  else if (!m && G.menu) autoResume();
+  G.menu = m;
+}
+
 function resetGame() {
   G.dlvl = 1;
   if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
   else { genLevel(); genWaves(G.dlvl); }   // every later game is a new one
   G.seed = SEED;
-  G.inv = { scroll: 0, potion: 0, wand: 0 }; G.hasteUntil = 0;
+  G.inv = { scroll: 0, potion: 0, wand: 0, charge: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
   G.score = 0; G.kills = 0;
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
-  G.spawnQueue = []; G.selTower = null; G.selType = 0;
-  G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false;
+  G.spawnQueue = []; G.menu = null;
+  G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
@@ -484,7 +527,7 @@ function descend() {
   genWaves(G.dlvl);
   G.wave = 0;
   G.towers = []; G.creeps = []; G.fx = [];
-  G.spawnQueue = []; G.selTower = null; G.selType = 0;
+  G.spawnQueue = []; G.menu = null;
   G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
@@ -540,6 +583,7 @@ function spawnCreep(type) {
   };
   advanceTarget(c);
   G.creeps.push(c);
+  if (m.boss) message("You sense the " + m.name + " is utterly unaffected by " + m.immuneTo + "!");
 }
 // a creep's cell: no fixed path -- monsters route live around towers
 // (see computeFlow/advanceTarget) -- but while crossing a room (never in
@@ -603,7 +647,9 @@ function sellTower(t) {
   const refund = Math.floor(t.spent * 0.7);
   G.gold += refund;
   G.towers = G.towers.filter(x => x !== t);
-  if (G.selTower === t) G.selTower = null;
+  // G.menu (if open on this tile) is left as-is -- menuOptions() is
+  // recomputed live each frame, so it naturally rolls over to showing
+  // build options for the now-empty tile
   if (TOWERS[t.type].blocks) G.flow = computeFlow();
   message("You dismantle the " + TOWERS[t.type].name + " for " + refund + " zorkmids.");
 }
@@ -613,14 +659,54 @@ const towerMaxCharges = (t) =>
   Math.round(TOWERS[t.type].maxCharges * Math.pow(1.5, t.lvl - 1));
 const CHARGE_REGEN = 0.4;   // charges/sec -- ~1 every 2.5s while below max
 
+// the action menu for a given tile: an existing tower's upgrade/sell, or
+// every tower type that's legal to build there. Computed fresh on every
+// call (never cached) so it always reflects current gold/tower/creep
+// state -- the menu is a live view of "what can I do here right now",
+// not a snapshot from when it was opened.
+function menuOptions(x, y) {
+  const t = towerAt(x, y);
+  if (t) {
+    const opts = [];
+    if (t.lvl < MAX_LVL) {
+      opts.push({ key: "u", label: "Upgrade to L" + (t.lvl + 1) + " ($" + upgradeCost(t) + ")",
+                  action: () => upgradeTower(t), keepOpen: true });
+    }
+    opts.push({ key: "s", label: "Sell (+$" + Math.floor(t.spent * 0.7) + ")",
+                action: () => sellTower(t), keepOpen: true });
+    return { tower: t, opts };
+  }
+  const opts = [];
+  for (let n = 1; n <= 6; n++) {
+    const spec = TOWERS[n];
+    const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
+    if (ok) opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + spec.cost + ")",
+                         action: () => buildTower(n, x, y) });
+  }
+  return { tower: null, opts };
+}
+// menuOptions() plus how many header lines (a live stats readout, only
+// for an existing tower) sit above the option list -- drawMenu() and
+// mousedown's click-hit-test both derive their line math from this SAME
+// function so they can never disagree about where an option line is
+function menuLayout(x, y) {
+  const r = menuOptions(x, y);
+  return { ...r, headerLines: r.tower ? 1 : 0 };
+}
+
 /* ---------- combat ---------- */
-function damageCreep(c, dmg) {
+function damageCreep(c, dmg, dtype) {
+  const m0 = MONSTERS[c.type];
+  if (dtype && m0.immuneTo === dtype) { c.hitFlash = 0.1; return; } // shrugs it off entirely
   c.hp -= dmg; c.hitFlash = 0.1;
   if (c.hp <= 0 && !c.dead) {
     c.dead = true;
     const m = MONSTERS[c.type];
     G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
-    if (m.boss) message("The " + m.name + " is destroyed!  You feel a surge of triumph! (+" + m.bounty + " zorkmids)");
+    if (m.boss) {
+      message("The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--");
+      G.paused = true;
+    }
     else message("The " + m.name + " is destroyed. (+" + m.bounty + " zorkmids)");
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
@@ -644,19 +730,22 @@ function spawnChild(parent, m) {
 /* ---------- items (random drops from kills) ---------- */
 function dropItem() {
   const roll = rnd();
-  if (roll < 0.4) {
+  if (roll < 0.35) {
     const g = 5 + G.wave * 2;
     G.gold += g;
     message("You find a small pile of zorkmids! (+" + g + ")");
-  } else if (roll < 0.65) {
+  } else if (roll < 0.55) {
     G.inv.scroll++;
     message("You find a scroll labeled ELBIB YLOH!  [r]ead it for fiery doom.");
-  } else if (roll < 0.85) {
+  } else if (roll < 0.75) {
     G.inv.potion++;
     message("You find a fizzy potion!  [q]uaff to hasten your towers.");
-  } else {
+  } else if (roll < 0.9) {
     G.inv.wand++;
     message("You find a wand of cold!  [z]ap it to chill every monster.");
+  } else {
+    G.inv.charge++;
+    message("You find a wand of charging!  [c]harge to restore your towers.");
   }
 }
 function useScroll() {
@@ -666,7 +755,7 @@ function useScroll() {
     if (c.dead) continue;
     const [x, y] = creepCell(c);
     splashFx(x, y, "#ff8850");
-    damageCreep(c, 45);
+    damageCreep(c, 45, "fire");
   }
   message("You read the scroll.  A pillar of flame scours the dungeon!");
 }
@@ -684,6 +773,19 @@ function useWand() {
     c.slowUntil = G.time + 4; c.slowFactor = 0.4;
   }
   message("You zap the wand of cold.  Every monster shivers and slows!");
+}
+function useCharge() {
+  if (G.inv.charge < 1) { message("You have no wands of charging."); return; }
+  G.inv.charge--;
+  let restored = 0;
+  for (const t of G.towers) {
+    const spec = TOWERS[t.type];
+    if (spec.maxCharges && t.charges < towerMaxCharges(t)) { t.charges = towerMaxCharges(t); restored++; }
+    if (spec.hp && t.hp < towerMaxHp(t)) { t.hp = towerMaxHp(t); restored++; }
+  }
+  message(restored
+    ? "You zap the wand of charging.  Your arsenal hums with restored power!"
+    : "You zap the wand of charging, but nothing here needed it.");
 }
 function beamFx(x1, y1, x2, y2, fg) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -719,7 +821,7 @@ function updateTowers(dt) {
         return !c.dead && !isSubmerged(c) && x === t.x && y === t.y;
       });
       if (victims.length) {
-        for (const c of victims) damageCreep(c, dmg);
+        for (const c of victims) damageCreep(c, dmg, "fire");
         splashFx(t.x, t.y, spec.fg);
         t.cd = spec.cd * hasteMul;
       }
@@ -736,7 +838,7 @@ function updateTowers(dt) {
       let hit = false;
       for (const c of targets) {
         c.slowUntil = G.time + spec.slowDur; c.slowFactor = spec.slow;
-        damageCreep(c, dmg); hit = true;
+        damageCreep(c, dmg, "cold"); hit = true;
       }
       if (hit) {
         const [x, y] = creepCell(targets[0]);
@@ -750,16 +852,18 @@ function updateTowers(dt) {
         if (c.dead || isSubmerged(c)) continue;
         const [x, y] = creepCell(c);
         if (Math.hypot(x - cx, y - cy) <= spec.splash &&
-            hasLineOfSight(cx, cy, x, y)) damageCreep(c, dmg);
+            hasLineOfSight(cx, cy, x, y)) damageCreep(c, dmg, "acid");
       }
       splashFx(cx, cy, spec.fg);
       t.cd = spec.cd * hasteMul;
     } else if (spec.kind === "chain") {
+      if (spec.maxCharges && Math.floor(t.charges) < 1) continue; // out of charges
+      if (spec.maxCharges) t.charges--;
       let dmgThis = dmg, current = targets[0];
       let [fromX, fromY] = [t.x, t.y];
       const hit = new Set();
       for (let i = 0; current && i <= spec.chainCount; i++) {
-        damageCreep(current, dmgThis);
+        damageCreep(current, dmgThis, "electric");
         hit.add(current);
         const [cx, cy] = creepCell(current);
         beamFx(fromX, fromY, cx, cy, spec.fg);
@@ -859,7 +963,7 @@ function update(dt) {
   updateCreeps(dt);
   updateWalls(dt);
 
-  if (G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
+  if (!G.paused && G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
     // wave cleared
     const bonus = 10 + G.wave * 2;
     G.gold += bonus; G.score += 100 * G.wave * G.dlvl;
@@ -874,7 +978,7 @@ function update(dt) {
     } else {
       G.state = "build";
       message("The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids." +
-        (G.autoStart ? "" : "  SPACE for wave " + (G.wave + 1) + "."));
+        (G.autoStart ? "" : "  --More--"));
       if (G.autoStart) startWave();
     }
   }
@@ -898,16 +1002,11 @@ function drawGame() {
   clearBuf();
   drawMap();
 
-  // range preview: selected tower, or placement preview at hover/cursor
+  // range preview: only meaningful once a menu is open on an existing tower
   const hx = G.cursor.on ? G.cursor.x : G.hover.x;
   const hy = G.cursor.on ? G.cursor.y : G.hover.y;
-  if (G.selTower) {
-    drawRange(G.selTower.x, G.selTower.y, towerRange(G.selTower), "#12241a");
-  } else if (G.selType && hy >= 0 && hy < MAPH) {
-    const spec = TOWERS[G.selType];
-    const ok = spec.kind === "trap" ? trapPlaceable(hx, hy) : buildable(hx, hy);
-    if (ok) drawRange(hx, hy, spec.range, "#12241a");
-  }
+  const menuTower = G.menu && towerAt(G.menu.x, G.menu.y);
+  if (menuTower) drawRange(menuTower.x, menuTower.y, towerRange(menuTower), "#12241a");
 
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
@@ -915,7 +1014,8 @@ function drawGame() {
     const cracked = spec.hp && t.hp < towerMaxHp(t) * 0.4;
     const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000"][t.lvl] || spec.fg;
     const fg = (empty || cracked) ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
-    put(t.x, MAPY + t.y, spec.ch, fg, t === G.selTower ? "#243024" : undefined);
+    const picked = G.menu && G.menu.x === t.x && G.menu.y === t.y;
+    put(t.x, MAPY + t.y, spec.ch, fg, picked ? "#243024" : undefined);
   }
   for (const c of G.creeps) {
     const [x, y] = creepCell(c);
@@ -936,9 +1036,18 @@ function drawGame() {
     cell.bg = "#3a4a3a";
   }
 
-  // message line
+  // message line -- a trailing "--More--" (NetHack's own wording) renders
+  // in reverse video, same as the real thing, instead of plain text
   const fade = G.msgAge > 6 ? "#4a6a4a" : "#d8e8c8";
-  text(0, 0, G.msg.slice(0, COLS), fade);
+  const moreTag = "--More--";
+  if (G.msg.endsWith(moreTag)) {
+    const body = G.msg.slice(0, -moreTag.length);
+    text(0, 0, body.slice(0, COLS), fade);
+    const mx = Math.min(COLS - moreTag.length, body.length);
+    for (let i = 0; i < moreTag.length; i++) put(mx + i, 0, moreTag[i], "#0a120a", "#c8e8b8");
+  } else {
+    text(0, 0, G.msg.slice(0, COLS), fade);
+  }
 
   // status lines
   const spd = G.speed > 1 ? "  x" + G.speed : "";
@@ -956,35 +1065,21 @@ function drawGame() {
   const spaceHint = G.state === "wave"
     ? (G.paused ? "SPACE:resume" : "SPACE:pause")
     : "SPACE:start wave";
-  let l2;
-  if (G.selTower) {
-    const t = G.selTower, spec = TOWERS[t.type];
-    l2 = spec.ch + " " + spec.name + " L" + t.lvl +
-      (spec.hp
-        ? "  hp:" + Math.ceil(t.hp) + "/" + towerMaxHp(t)
-        : "  dmg:" + towerDmg(t) + "  rng:" + towerRange(t).toFixed(1) +
-          (spec.maxCharges ? "  chg:" + Math.floor(t.charges) + "/" + towerMaxCharges(t) : "")) +
-      (t.lvl < MAX_LVL ? "  [u]pgrade $" + upgradeCost(t) : "  (max)") +
-      "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC";
-  } else {
-    l2 = G.selType
-      ? "Readied: " + TOWERS[G.selType].ch + " " + TOWERS[G.selType].name + "  place it!"
-      : "1:/$10 2:0$25 3:{$20 4:^$15 5:\\$30 6:%$8 (ready)";
-    l2 += "  " + spaceHint + " i:inv ?:help";
-    // hovered monster info
-    if (hy >= 0 && hy < MAPH) {
-      const c = G.creeps.find(c => {
-        const [x, y] = creepCell(c); return x === hx && y === hy;
-      });
-      if (c) l2 = "You see: " + MONSTERS[c.type].name + "  HP:" +
-        Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "");
-    }
+  let l2 = "Click a tile for options   " + spaceHint + "   i:inv  ?:help";
+  // hovered monster info takes priority over the generic hint
+  if (hy >= 0 && hy < MAPH) {
+    const c = G.creeps.find(c => {
+      const [x, y] = creepCell(c); return x === hx && y === hy;
+    });
+    if (c) l2 = "You see: " + MONSTERS[c.type].name + "  HP:" +
+      Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "");
   }
   text(0, 23, l2.padEnd(COLS).slice(0, COLS), "#8aa87a");
 
   if (G.overlay === "help") drawHelp();
   else if (G.overlay === "inv") drawInventory();
   else if (G.overlay === "log") drawLog();
+  else if (G.menu) drawMenu();
 }
 
 function drawCentered(lines, y0, fg) {
@@ -995,25 +1090,61 @@ function overlayBox(x0, y0, w, h, title) {
     put(x, y, " ", "#4a7a4a", "#0a120a");
   if (title) text(x0 + 2, y0, title, "#e8e850");
 }
+// screen-space box for the tile-action menu, positioned near the tile it's
+// for (below-right by default) but clamped to stay within the map rows
+// (1..21, never over the status bar) and columns -- both drawMenu() and
+// the mousedown click-hit-test use this SAME function, so they always
+// agree on where the menu's option lines actually are
+function menuBox(x, y, n) {
+  const w = 36, h = n + 3;
+  const sx = x, sy = MAPY + y;
+  const bx0 = Math.max(0, Math.min(COLS - w, sx + 2));
+  const by0 = Math.max(1, Math.min(22 - h, sy - 1));
+  return { bx0, by0, w, h };
+}
+function drawMenu() {
+  const { x, y } = G.menu;
+  const { tower, opts, headerLines } = menuLayout(x, y);
+  const { bx0, by0, w, h } = menuBox(x, y, Math.max(opts.length, 1) + headerLines);
+  const title = tower ? TOWERS[tower.type].ch + " " + TOWERS[tower.type].name + " L" + tower.lvl
+                       : "Build here";
+  overlayBox(bx0, by0, w, h, title);
+  let row = by0 + 2;
+  if (tower) {
+    const spec = TOWERS[tower.type];
+    const stat = spec.hp
+      ? "hp:" + Math.ceil(tower.hp) + "/" + towerMaxHp(tower)
+      : "dmg:" + towerDmg(tower) + "  rng:" + towerRange(tower).toFixed(1) +
+        (spec.maxCharges ? "  chg:" + Math.floor(tower.charges) + "/" + towerMaxCharges(tower) : "");
+    text(bx0 + 2, row, stat, "#8aa87a");
+    row++;
+  }
+  if (!opts.length) {
+    text(bx0 + 2, row, "Nothing can be built here.", "#8a8a6a");
+  } else {
+    opts.forEach((o, i) => text(bx0 + 2, row + i, "[" + o.key + "] " + o.label, "#c8e8b8"));
+  }
+  text(bx0 + 2, by0 + h - 1, "ESC to close", "#6a8a6a");
+}
 function drawHelp() {
   const x0 = 8, y0 = 1, w = 64, h = 21;
   overlayBox(x0, y0, w, h);
   const lines = [
     "--------------------- YATD Help ---------------------",
-    "Monsters route live around towers -- no fixed path. Leaks",
-    "cost HP. Clear wave 10 to descend (up to Dlvl " + MAX_DLVL + ").",
-    "TOWERS -- 1-6 to ready, click/ENTER to build (number again",
-    "each time). Most block & need LOS. Enchant (u) up to L" + MAX_LVL + ".",
-    " 1 / Wand of Striking  $10  bolts, limited charges, recharges",
-    " 2 0 Acid Blob         $25  splash, blocks, needs LOS",
-    " 3 { Frost Fountain    $20  slows, blocks, needs LOS",
+    "Click a tile (or ENTER on the cursor) for a menu of",
+    "what to do there. Monsters route live, no fixed path.",
+    " 1 / Wand of Striking  $10  bolts, limited charges",
+    " 2 0 Acid Blob         $25  splash, blocks, LOS",
+    " 3 { Frost Fountain    $20  slows, blocks, LOS",
     " 4 ^ Fire Trap         $15  ON the corridor #, no block",
-    " 5 \\ Wand of Lightning $30  arcs to 2 more, blocks, LOS",
+    " 5 \\ Wand of Lightning $30  arcs to 2 more, limited charges",
     " 6 % Dirt Wall         $8   pure block, hp, no combat",
-    "",
-    "ITEMS: r read ?scroll  q quaff !potion  z zap /wand  i inv",
-    "KEYS: SPACE wave/pause  u upgrade  s sell  a auto  Ctrl-P log",
-    "      hjkl/arrows+ENTER cursor  + - speed  R restart",
+    "Most block & need LOS. Enchant up to L" + MAX_LVL + " in the menu.",
+    "Each level's dragon resists a random element -- mix",
+    "your damage types, one tower type won't always win.",
+    "ITEMS: r fire  q haste  z cold  c charge  i inv",
+    "KEYS: SPACE wave/pause  a auto  Ctrl-P log  R restart",
+    "      hjkl/arrows+ENTER cursor  + - speed",
     "",
     "MONSTERS: r rat  x bug  a ant  b bat(flies!)  k kobold",
     "  ; eel(submerges!)  o orc  & demon(splits!)  Z zombie",
@@ -1022,12 +1153,13 @@ function drawHelp() {
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }
 function drawInventory() {
-  const x0 = 14, y0 = 6, w = 52, h = 11;
+  const x0 = 14, y0 = 6, w = 52, h = 14;
   overlayBox(x0, y0, w, h);
   const rows = [
-    ["?", "scroll of fireball", G.inv.scroll, "r read"],
-    ["!", "potion of haste",    G.inv.potion, "q quaff"],
-    ["/", "wand of cold",       G.inv.wand,   "z zap"],
+    ["?", "scroll of fireball",  G.inv.scroll, "r read"],
+    ["!", "potion of haste",     G.inv.potion, "q quaff"],
+    ["/", "wand of cold",        G.inv.wand,   "z zap"],
+    ["/", "wand of charging",    G.inv.charge, "c zap"],
   ];
   text(x0 + 2, y0, "----------------- Inventory -----------------", "#e8e850");
   let row = y0 + 2;
@@ -1133,15 +1265,33 @@ canvas.addEventListener("mousedown", (e) => {
   const [x, y] = cellFromEvent(e);
   G.hover.x = x; G.hover.y = y;   // keep the range-preview in sync with the click
   if (y < 0 || y >= MAPH) return;
-  activate(x, y);
+
+  // a click inside the currently-open menu's box runs whichever option
+  // line it landed on (or does nothing, if it hit the title/border/
+  // footer rather than an option) -- either way it does NOT also
+  // re-trigger the toggle-menu logic below
+  if (G.menu) {
+    const { opts, headerLines } = menuLayout(G.menu.x, G.menu.y);
+    const box = menuBox(G.menu.x, G.menu.y, Math.max(opts.length, 1) + headerLines);
+    const sx = x, sy = MAPY + y;
+    if (sx >= box.bx0 && sx < box.bx0 + box.w && sy >= box.by0 && sy < box.by0 + box.h) {
+      const lineIdx = sy - (box.by0 + 2 + headerLines);
+      if (lineIdx >= 0 && lineIdx < opts.length) {
+        const opt = opts[lineIdx];
+        opt.action();
+        if (!opt.keepOpen) setMenu(null);
+      }
+      return;
+    }
+  }
+  toggleMenu(x, y);
 });
-function activate(x, y) {
-  if (G.overlay) { G.overlay = null; return; }
-  const t = towerAt(x, y);
-  if (t) { G.selTower = t; return; }
-  G.selTower = null;
-  if (!G.selType) { message("Ready a tower first: press 1, 2, 3, or 4."); return; }
-  if (buildTower(G.selType, x, y)) G.selType = 0; // reselect before next placement
+// open the tile-action menu, or close it if it's already open for this
+// exact tile (a second click/ENTER on the same spot toggles it closed)
+function toggleMenu(x, y) {
+  if (G.menu && G.menu.x === x && G.menu.y === y) { setMenu(null); return; }
+  if (G.overlay) { setOverlay(null); return; }
+  setMenu({ x, y });
 }
 
 const DIRS = {
@@ -1158,22 +1308,30 @@ window.addEventListener("keydown", (e) => {
   }
   // overlays (help / inventory / message log) toggle regardless of state,
   // and swallow every other key while one is open
-  if (e.key === "?") { G.overlay = G.overlay === "help" ? null : "help"; return; }
-  if (e.key === "i") { G.overlay = G.overlay === "inv" ? null : "inv"; return; }
+  if (e.key === "?") { setOverlay(G.overlay === "help" ? null : "help"); return; }
+  if (e.key === "i") { setOverlay(G.overlay === "inv" ? null : "inv"); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "p") {
     e.preventDefault();
-    G.overlay = G.overlay === "log" ? null : "log";
+    setOverlay(G.overlay === "log" ? null : "log");
     return;
   }
-  if (G.overlay) { if (e.key === "Escape") G.overlay = null; return; }
+  if (G.overlay) { if (e.key === "Escape") setOverlay(null); return; }
 
-  if (e.key >= "1" && e.key <= "6") {
-    G.selType = +e.key; G.selTower = null;
-    message("Ready: " + TOWERS[G.selType].name + " ($" + TOWERS[G.selType].cost + ") — " + TOWERS[G.selType].desc);
-    return;
+  // the tile-action menu: Escape closes it, and any key matching one of
+  // its currently-shown [key] options runs that action -- everything
+  // else (hjkl, SPACE, item hotkeys...) falls through and keeps working,
+  // unlike the overlays above, since the menu is a lightweight popup,
+  // not a modal that should block the rest of the game
+  if (G.menu) {
+    if (e.key === "Escape") { setMenu(null); return; }
+    const { opts } = menuOptions(G.menu.x, G.menu.y);
+    const opt = opts.find(o => o.key.toLowerCase() === e.key.toLowerCase());
+    if (opt) { opt.action(); if (!opt.keepOpen) setMenu(null); return; }
   }
+
   switch (e.key) {
     case " ":
+      if (G.menu && G.autoPaused) return; // pause state is governed by the open menu, not SPACE
       if (G.state === "build") { startWave(); return; }
       if (G.state === "wave") {
         G.paused = !G.paused;
@@ -1186,15 +1344,13 @@ window.addEventListener("keydown", (e) => {
       message("Game speed x" + G.speed); return;
     case "-": G.speed = Math.max(1, G.speed / 2);
       message("Game speed x" + G.speed); return;
-    case "u": if (G.selTower) { upgradeTower(G.selTower); return; } break;
-    case "s": if (G.selTower) { sellTower(G.selTower); return; } break;
     case "r": useScroll(); return;
     case "q": usePotion(); return;
     case "z": useWand(); return;
+    case "c": useCharge(); return;
     case "R": resetGame(); return;
-    case "Escape": G.selTower = null; G.selType = 0; return;
     case "Enter":
-      if (G.cursor.on) activate(G.cursor.x, G.cursor.y);
+      if (G.cursor.on) toggleMenu(G.cursor.x, G.cursor.y);
       return;
   }
   const d = DIRS[e.key];

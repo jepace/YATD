@@ -77,20 +77,27 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `spawnCreep`), or random short paths make wave 10 unwinnable.
    **Balance lives in these tables and `genWaves`'s budget curve** — tune
    there, not in the logic.
-   The Wand of Striking tower (`TOWERS[1]`) has limited `maxCharges`,
-   scaling with level via `towerMaxCharges(t)` (×1.5 per level, up to
-   `MAX_LVL` = 4) and regenerating passively at `CHARGE_REGEN`
-   charges/sec even while off cooldown or mid-wave; enchanting a wand
-   (`upgradeTower`) refills it to its new max. A depleted wand renders
-   dimmed (`empty` check in the tower draw loop) and simply stops firing
-   — `updateTowers` `continue`s past it without resetting `t.cd`, so it
-   fires again the instant a charge trickles back in.
-   `TOWERS[5]` (Wand of Lightning, `kind: "chain"`) is a bolt that arcs:
-   after damaging its primary target it looks for the nearest un-hit,
-   non-submerged, LOS-visible creep within `chainRange` of the *previous*
-   hit (not the tower), deals `chainFalloff`-reduced damage, and repeats
-   up to `chainCount` extra times — each hop draws its own `beamFx`
-   segment. `TOWERS[6]` (Dirt Wall, `kind: "wall"`) is pure obstacle: it
+   Both wand towers (`TOWERS[1]` Wand of Striking, `TOWERS[5]` Wand of
+   Lightning) have limited `maxCharges`, scaling with level via
+   `towerMaxCharges(t)` (×1.5 per level, up to `MAX_LVL` = 4) and
+   regenerating passively at `CHARGE_REGEN` charges/sec even while off
+   cooldown or mid-wave; enchanting a wand (`upgradeTower`) refills it to
+   its new max. A depleted wand renders dimmed (`empty` check in the
+   tower draw loop) and simply stops firing — `updateTowers` `continue`s
+   past it without resetting `t.cd`, so it fires again the instant a
+   charge trickles back in. (Everything in this game is meant to ebb and
+   flow rather than being purely one-directional — wands drain and
+   recharge, walls take damage and can be repaired, monsters take damage
+   and passively regen — so if you add a new resource, default to giving
+   it both directions rather than a one-way meter.)
+   `TOWERS[5]` (`kind: "chain"`) is a bolt that arcs: after damaging its
+   primary target it looks for the nearest un-hit, non-submerged,
+   LOS-visible creep within `chainRange` of the *previous* hit (not the
+   tower), deals `chainFalloff`-reduced damage, and repeats up to
+   `chainCount` extra times — each hop draws its own `beamFx` segment;
+   its charge gate/decrement (`spec.maxCharges && ...`) sits at the top
+   of this branch, mirroring the bolt branch's. `TOWERS[6]` (Dirt Wall,
+   `kind: "wall"`) is pure obstacle: it
    has `hp`/`towerMaxHp(t)` instead of `dmg`/`range`, `updateTowers`
    `continue`s past it immediately (no combat branch applies), and a
    separate `updateWalls(dt)` (called right after `updateCreeps` in
@@ -101,14 +108,41 @@ The `<script>` is organized top-to-bottom in sections (marked with
    — they participate in the maze system automatically via `blocks: true`,
    which is the whole point of that flag being generic.
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
-   `?` scroll of fireball (`r`, 45 dmg to all), `!` potion of haste
-   (`q`, towers 2× rate 8s via `G.hasteUntil`), `/` wand of cold
-   (`z`, slow all 4s). Inventory in `G.inv`; view with the `i` overlay
-   (`drawInventory`). All game events go through `message(s)`, which
-   both sets the message line and appends to `G.log` (viewed via the
-   `log` overlay, `Ctrl-P`, NetHack-style). There is no floating combat
-   text — kills, drops, leaks etc. are all reported as messages, not
-   `G.fx`-style popups.
+   `?` scroll of fireball (`r`, 45 fire dmg to all — respects dragon fire
+   immunity, see below), `!` potion of haste (`q`, towers 2× rate 8s via
+   `G.hasteUntil`), `/` wand of cold (`z`, slow all 4s), `/` wand of
+   charging (`c`, instantly maxes every tower's `charges`/`hp`). Inventory
+   in `G.inv`; view with the `i` overlay (`drawInventory`). All game
+   events go through `message(s)`, which both sets the message line and
+   appends to `G.log` (viewed via the `log` overlay, `Ctrl-P`,
+   NetHack-style). There is no floating combat text — kills, drops, leaks
+   etc. are all reported as messages, not `G.fx`-style popups. A message
+   ending in the literal string `"--More--"` renders that suffix in
+   reverse video (real NetHack's own wording and look) — used for
+   anything the player must consciously dismiss with SPACE (wave-clear,
+   boss kill) rather than a message that just scrolls by.
+
+   **Elemental damage & dragon immunity:** `damageCreep(c, dmg, dtype)`'s
+   third argument is one of `"fire"|"acid"|"electric"|"cold"` (or omitted
+   for untyped/physical, which always lands); if `dtype` matches the
+   target's `MONSTERS[c.type].immuneTo`, the hit is fully absorbed (0
+   damage, but `hitFlash` still fires so it doesn't look like nothing
+   happened). Fire trap→fire, acid blob→acid, wand of lightning→electric,
+   frost fountain→cold, wand of striking→untyped (always effective, the
+   "reliable" tower), fireball scroll→fire. The demon is permanently
+   fire-immune and the eel electric-immune; the dragon's color (and thus
+   its immunity) is randomized per level by `pickDragon()` — called from
+   `genWaves(dlvl)` right where wave 10's dragon group is added, picking
+   one of `DRAGON_COLORS` with the seeded `rnd()`/`ri()` (so it's
+   reproducible per dungeon like everything else). `pickDragon()`
+   mutates the shared `MONSTERS.D` entry directly rather than threading a
+   per-creep override through every render/message site — safe because
+   there's only ever one dragon alive at a time (the lone wave-10 boss)
+   and levels are strictly sequential, never concurrent. If you add a
+   damage source, decide deliberately whether it has an elemental type
+   (and pass it) or is physical (and doesn't) — the point of dragon
+   immunity is that no single tower trivializes every level's boss, so a
+   new AoE/instant-hit effect that forgets to type itself defeats that.
 
 4. **Game state** — the global `G` object (also `window.G` for tests).
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
@@ -127,6 +161,18 @@ The `<script>` is organized top-to-bottom in sections (marked with
    they're intentionally separate functions, not one calling the other,
    because `resetGame()` also resets things (gold, HP, score, inventory)
    that `descend()` must NOT touch.
+
+   **Boss-kill pause:** killing a boss (`m.boss`) sets `G.paused = true`
+   directly (not via `autoPause()` — see section 7) alongside its
+   `--More--` message, so the player has to consciously acknowledge the
+   kill with SPACE before anything continues. This is a genuine mid-frame
+   hazard: `damageCreep()` is called from deep inside `updateTowers()`,
+   and `update()` keeps running the rest of its body (`updateCreeps`,
+   `updateWalls`, the wave-clear check) in that same frame regardless —
+   so the wave-clear check is explicitly guarded with `!G.paused` to stop
+   it from resolving `descend()`/`won` before the player ever sees the
+   pause. If you add another mid-`update()` pause trigger, it needs the
+   same guard or it'll be invisible one frame out of every game.
 
    **Pathfinding (maze-building TD, not a fixed-path TD):** most towers
    (`TOWERS[n].blocks === true` — everything except the fire trap)
@@ -218,21 +264,62 @@ The `<script>` is organized top-to-bottom in sections (marked with
    lost have their own draw functions. Full redraw is cheap; don't add
    dirty-tracking.
 
-7. **Input** — mouse (hover + click) and keyboard (vi-keys cursor,
-   hotkeys) both funnel into `activate(x, y)`. Add new hotkeys in the
-   single `keydown` switch. Note: `u` upgrades a selected tower but falls
-   through to nothing otherwise; `h j k l b n y` are cursor movement, so
-   avoid reusing those letters. `?`, `i`, and `Ctrl-P` toggle the three
-   overlays (see above) from anywhere and are checked before the overlay
-   swallows other keys — add new overlay-toggle keys next to them, not
-   inside the `switch`. Tower placement is intentionally NOT sticky:
-   `G.selType` (the readied tower, 0 = none) is cleared by `activate()`
-   after every successful `buildTower()`, so the player must press 1–4
-   again before each placement — this prevents accidental multi-builds
-   when clicking around or moving the keyboard cursor. `SPACE` is
-   contextual: `startWave()` while `G.state === "build"`, otherwise
-   toggles `G.paused`. Bindings intentionally mirror NetHack where one
-   exists (`r`ead, `q`uaff, `z`ap, `i`nventory, `Ctrl-P` message log).
+7. **Input — tile-action menu, not a readied-tool model.** Clicking a
+   tile (or moving the keyboard cursor and pressing `ENTER`) opens a
+   small popup — `G.menu = { x, y }` — listing every action legal on
+   *that specific tile*: an existing tower's `[u]pgrade`/`[s]ell`, or one
+   `[1]`–`[6]` build option per tower type that's actually placeable
+   there. `menuOptions(x, y)` computes this **fresh on every call**
+   (never cached on `G.menu` itself) so it's always a live view of what's
+   currently legal — e.g. re-opens automatically showing build options
+   the instant you sell a tower, since the tile's options changed but
+   `G.menu` still points at the same `{x,y}`. `menuLayout(x, y)` wraps
+   it and adds `headerLines` (1 for an existing tower's live stats
+   readout — dmg/range/charges or hp — 0 for a build menu, which has no
+   single tower's stats to show); `menuBox(x,y,n)` computes the popup's
+   on-screen box (clamped to stay within map rows/columns) from a total
+   line count that must include `headerLines`. `drawMenu()` and the
+   `mousedown` handler's click-hit-test both call `menuLayout`/`menuBox`
+   the same way and derive each option's row from the same
+   `by0 + 2 + headerLines` offset, so rendering and hit-testing can never
+   disagree about where an option line actually is — if you change one
+   side's row math you must change the other's identically. `toggleMenu(x,y)`
+   opens/closes the menu (same tile twice = close). Executing an option
+   normally closes the menu, EXCEPT upgrade/sell (`keepOpen: true` on
+   those two), so you can keep enchanting the same tower, or immediately
+   see rebuild options after selling, without reopening it. The old
+   "press 1–4 to ready a tool, then click" model and its bottom-line tool
+   list are gone — don't reintroduce a persistent tool-select control,
+   that's the exact UX this replaced.
+
+   The menu is a lightweight popup, not a modal: unmatched keys fall
+   through to the rest of `keydown` while it's open (so `hjkl` cursor
+   movement, item hotkeys, etc. keep working), unlike the three big
+   overlays (`help`/`inv`/`log`, toggled by `?`/`i`/`Ctrl-P`), which
+   genuinely swallow everything else and are checked earlier in
+   `keydown` for that reason. `Escape` closes whichever of overlay/menu
+   is open; a click always tries the overlay first (closes it without
+   also opening a menu — a second click is needed to actually open one).
+
+   **Opening either an overlay or the menu auto-pauses a running wave**,
+   and closing it auto-resumes — `setOverlay(name)`/`setMenu(m)` are the
+   only correct way to mutate `G.overlay`/`G.menu`; they call
+   `autoPause()`/`autoResume()` on the open/close transition. Never
+   assign `G.overlay =` / `G.menu =` directly. `G.autoPaused` tracks
+   *why* it's paused so a manual `SPACE` pause (or a boss-kill pause, see
+   section 4) is never silently undone by closing a menu that happened
+   to also be open — `autoResume()` only un-pauses if `G.autoPaused` is
+   true, i.e. WE were the one who paused it.
+
+   Bindings mirror NetHack where one exists (`r`ead, `q`uaff, `z`ap,
+   `i`nventory, `Ctrl-P` message log); `h j k l y u2 b n` are cursor
+   movement (note the fake `u2` key name — plain `u`/`s` are reserved for
+   the menu's upgrade/sell, not diagonal cursor movement, so avoid
+   reusing those two letters for anything else). `SPACE` is contextual:
+   `startWave()` while `G.state === "build"`, otherwise toggles
+   `G.paused` — except it's a no-op while `G.menu && G.autoPaused` is
+   true, since pause state is governed by the menu in that case, not by
+   SPACE.
 
 8. **Main loop** — fixed-timestep (`STEP = 1/60`) accumulator inside
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put
