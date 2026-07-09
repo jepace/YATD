@@ -1067,9 +1067,11 @@ function updateTowers(dt) {
     if (t.cd > 0) continue;
     const dmg = towerDmg(t), range = towerRange(t);
     if (spec.kind === "trap") {
+      // flying creeps pass over a flush-with-the-floor trap the same way
+      // they pass over a blocking tower -- they never touch the ground
       const victims = G.creeps.filter(c => {
         const [x, y] = creepCell(c);
-        return !c.dead && !isSubmerged(c) && x === t.x && y === t.y;
+        return !c.dead && !isSubmerged(c) && !MONSTERS[c.type].flies && x === t.x && y === t.y;
       });
       if (victims.length) {
         for (const c of victims) damageCreep(c, dmg, "fire");

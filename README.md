@@ -123,7 +123,8 @@ glyph always means the exact same monster.
 Special abilities are spread across several tiers rather than one
 signature monster apiece, so which ones you'll face varies run to run:
 **flying** (cave bat, vampire bat, wraith — ignores your towers
-entirely, the counter to turtling behind a wall), **submerging** (giant
+entirely, the counter to turtling behind a wall, and passes over fire
+traps untouched too, same reasoning), **submerging** (giant
 eel, kraken — periodically untargetable by everything except a scroll
 of fireball, and always electricity-immune), **splitting** (demon,
 horned devil — spawns a weaker copy of itself on death, and is always

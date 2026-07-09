@@ -79,7 +79,11 @@ The `<script>` is organized top-to-bottom in sections (marked with
    vampire bat, wraith) makes a
    creep use `G.flowFly` instead of `G.flow` — see the pathfinding note
    below, this is the counter to a turtled tower maze, it ignores
-   blocking towers entirely (still stopped by rock/walls); `splits: true`
+   blocking towers entirely (still stopped by rock/walls); the fire
+   trap's victim filter in `updateTowers` also excludes `m.flies` for the
+   same reason — a trap is flush with the floor, and a flyer never
+   touches the ground it's on, exactly like it never touches a blocking
+   tower's tile; `splits: true`
    + `splitChance`/`splitHpFrac` (demon, horned devil) spawns a weaker copy of itself
    on death via `spawnChild()`, which sets `child: true` on the copy so
    it can't chain-split; `submerges: true` (eel, kraken) makes `isSubmerged(c)`
