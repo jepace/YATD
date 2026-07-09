@@ -19,6 +19,13 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Wand of charging is now targeted, not a blanket effect.** Follow-up
+  to a report that it "just charges everything" while its two sibling
+  consumables are aimed — `c` now arms `G.targeting` (`beginCharge()`,
+  radius 3.0) exactly like the fireball scroll and cold wand, and only
+  towers within that radius get the dice-roll restore. Reinforces the
+  standing rule that nothing in this game is a map-wide effect; see
+  `CLAUDE.md` section 3.
 - **Message variety.** The highest-repeat flavor messages (kill, boss
   kill, leak, build, upgrade, sell, item drops, tower destroyed/disarmed,
   wave-clear, descend, haste potion) now each pick from 2–4 variants via

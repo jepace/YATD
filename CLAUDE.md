@@ -211,20 +211,25 @@ The `<script>` is organized top-to-bottom in sections (marked with
    full top-off, in keeping with "nothing is perfect" — applies uniformly
    to any tower with `spec.maxCharges` or `spec.hp` set, so the wand of
    lightning benefits from it exactly like the wand of striking with no
-   special-casing needed). The fireball scroll and cold wand are
-   **targeted, not instant**: `r`/`z` calls `beginScroll()`/`beginWand()`,
-   which arms `G.targeting = { kind, radius }` via `setTargeting()`
-   (auto-pausing like a menu/overlay, see `setMenu`/`setOverlay` below)
-   instead of applying the effect immediately; the next click, or ENTER
-   on the keyboard cursor, calls `resolveTargeting(x,y)`, which only hits
-   creeps (via `creepCell`) within `radius` of that point, then consumes
-   the inventory slot. `drawGame()` renders a live range-preview circle
-   at the hover/cursor position while targeting is active (same
+   special-casing needed). The fireball scroll and cold wand and charging
+   wand are **all targeted, not instant, and not blanket effects** —
+   nothing in this game should apply to everything at once (the same
+   "nothing is perfect, everything is useful" philosophy, applied to
+   *scope* rather than magnitude): `r`/`z`/`c` calls
+   `beginScroll()`/`beginWand()`/`beginCharge()`, which arms
+   `G.targeting = { kind, radius }` via `setTargeting()` (auto-pausing
+   like a menu/overlay, see `setMenu`/`setOverlay` below) instead of
+   applying the effect immediately; the next click, or ENTER on the
+   keyboard cursor, calls `resolveTargeting(x,y)`, which only hits creeps
+   (fireball/cold, via `creepCell`) or towers (charging, via `t.x,t.y`
+   directly since towers don't move) within `radius` of that point, then
+   consumes the inventory slot. `drawGame()` renders a live range-preview
+   circle at the hover/cursor position while targeting is active (same
    `drawRange()` helper the menu's tower-range preview uses, different
    tint). Escape while targeting cancels without consuming the item, and
-   both hotkeys are only reachable from the base `keydown` switch (after
-   the overlay-swallow and menu-key-match blocks), so a targeting arm can
-   never fire while an overlay/menu is already open. Inventory in
+   all three hotkeys are only reachable from the base `keydown` switch
+   (after the overlay-swallow and menu-key-match blocks), so a targeting
+   arm can never fire while an overlay/menu is already open. Inventory in
    `G.inv`; view with the `i`
    overlay (`drawInventory`), which is directly usable rather than a pure
    readout — `invItems()` is the single source of truth for which items
@@ -239,12 +244,12 @@ The `<script>` is organized top-to-bottom in sections (marked with
    overlay-swallow) and in `mousedown` (before the generic
    click-closes-overlay fallback in `toggleMenu`), since the whole point
    of opening the inventory is usually to decide what to use, not to
-   memorize a hotkey and close it first. The wand of charging is the one
-   item with no `beginX()`/targeting step — it's a burst effect over
-   every tower on the level, not aimed at a tile at all, which is worth
-   remembering if you add a new consumable: decide deliberately whether
-   it's aimed (`beginScroll`/`beginWand`'s pattern) or a blanket effect
-   (`useCharge`'s), don't assume every wand gets a targeting reticle. All game
+   memorize a hotkey and close it first. Every current consumable is
+   aimed (`beginScroll`/`beginWand`/`beginCharge`'s shared pattern) —
+   there is deliberately no blanket, map-wide item effect. If you add a
+   new consumable, default to giving it a `beginX()`/targeting step too;
+   only skip it with a specific reason (documented at the call site) if
+   the effect genuinely can't be localized to a point. All game
    events go through `message(s)`, which both sets the message line and
    appends to `G.log` (viewed via the `log` overlay, `Ctrl-P`,
    NetHack-style). There is no floating combat text — kills, drops, leaks
@@ -320,8 +325,8 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `spec.trapHp`) a tower has; reaching 0 destroys the tower with no
    refund, same as a wall crumbling — siege recomputes `G.flow` since the
    tile becomes walkable again, disarming doesn't since traps never
-   blocked movement. `buildTower`/`upgradeTower`/`useCharge` (wand of
-   charging) all treat `siegeHp`/`trapHp` exactly like `hp`/`maxCharges`
+   blocked movement. `buildTower`/`upgradeTower`/`resolveTargeting`'s
+   `"charge"` branch (wand of charging) all treat `siegeHp`/`trapHp` exactly like `hp`/`maxCharges`
    already were — initialize on build, refill on enchant, eligible for a
    charging-wand dice roll — so a new destructible resource on a tower
    doesn't need a fourth copy of that logic, just one more `if`.

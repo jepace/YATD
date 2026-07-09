@@ -33,18 +33,21 @@ particular first dungeon (the seed is shown on the title screen).
 
 Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of
 fireball, `!` potions of haste (`q`uaff to double your towers' speed for
-8s), `/` wands of cold, and `/` wands of charging (`c`harge to restore
-charges and HP to every wand and wall that needs it — like the real
-NetHack item, it's a dice roll, not a guaranteed top-off, and rolls
-better on your higher-level towers). Press `i` to check your pack.
+8s), `/` wands of cold, and `/` wands of charging (restores charges/HP
+to towers near where you aim it — like the real NetHack item, it's a
+dice roll, not a guaranteed top-off, and rolls better on your
+higher-level towers). Press `i` to check your pack.
 
-The scroll of fireball and wand of cold are **targeted**: `r`ead or
-`z`ap arms it, then click a tile (or move the keyboard cursor there and
-press `ENTER`) to choose the impact point — a preview circle shows the
-blast radius as you aim. Only monsters within that radius are hit;
+The scroll of fireball, wand of cold, and wand of charging are all
+**targeted**: `r`ead or `z`ap/`c`harge arms it, then click a tile (or
+move the keyboard cursor there and press `ENTER`) to choose the impact
+point — a preview circle shows the radius as you aim. Only monsters (or,
+for the charging wand, towers) within that radius are affected;
 `Escape` cancels without consuming the item. Fireball burns everything
 in a 4-tile radius for 45 fire damage; the wand of cold slows everything
-in a 4.5-tile radius for 4s.
+in a 4.5-tile radius for 4s; the wand of charging restores every tower
+within a 3-tile radius. Nothing in this game is a blanket, map-wide
+effect — you always have to commit to a spot.
 
 ## Towers
 
@@ -204,11 +207,9 @@ the clock while deciding what to build.
   player level-ups all stop for it). Also closes the inventory/log/help
   overlay or the monster lore popup, same as `Escape`.
 - `r` read scroll · `q` quaff potion · `z` zap wand of cold · `c` zap
-  wand of charging · `i` inventory. Reading the scroll or zapping the
-  cold wand arms a targeted deploy — see Items above. **The wand of
-  charging has no target at all** — unlike the fireball scroll or wand
-  of cold, it's a burst that recharges every tower on the level at once,
-  not something you aim; that's why it never prompts for a tile.
+  wand of charging · `i` inventory. All three consumables are aimed —
+  each arms a targeted deploy, then a click or `ENTER` picks the spot —
+  see Items above.
 - The inventory screen is directly usable, not just a readout: click an
   item's row (or press its hotkey while the screen is open) to use it on
   the spot instead of closing the menu and pressing the hotkey again.

@@ -1109,6 +1109,37 @@ function resolveTargeting(x, y) {
     message(hit
       ? "You zap the wand of cold.  Monsters nearby shiver and slow!"
       : "You zap the wand of cold, but nothing was close enough to chill.");
+  } else if (kind === "charge") {
+    G.inv.charge--;
+    // like the real thing, this is not a guaranteed full recharge -- each
+    // tower gets its own roll (t.lvl dice of d6), so nothing is ever a
+    // sure top-off and a level-1 tower barely benefits compared to a
+    // level-4 one
+    const roll = (t) => { let r = 0; for (let i = 0; i < t.lvl; i++) r += ri(1, 6); return r; };
+    let restored = 0;
+    for (const t of G.towers) {
+      if (Math.hypot(t.x - x, t.y - y) > radius) continue;
+      const spec = TOWERS[t.type];
+      if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
+        t.charges = Math.min(towerMaxCharges(t), t.charges + roll(t));
+        restored++;
+      }
+      if (spec.hp && t.hp < towerMaxHp(t)) {
+        t.hp = Math.min(towerMaxHp(t), t.hp + roll(t));
+        restored++;
+      }
+      if (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t)) {
+        t.siegeHp = Math.min(towerMaxSiegeHp(t), t.siegeHp + roll(t));
+        restored++;
+      }
+      if (spec.trapHp && t.trapHp < towerMaxTrapHp(t)) {
+        t.trapHp = Math.min(towerMaxTrapHp(t), t.trapHp + roll(t));
+        restored++;
+      }
+    }
+    message(restored
+      ? "You zap the wand of charging.  Nearby towers crackle with renewed power!"
+      : "You zap the wand of charging, but nothing nearby needed it.");
   }
 }
 function usePotion() {
@@ -1121,36 +1152,14 @@ function usePotion() {
     "Gulp.  Your towers blur into a frenzy! (8s)",
   ]));
 }
-function useCharge() {
+// like the fireball scroll and wand of cold, the wand of charging is
+// aimed, not a blanket effect over every tower on the level -- nothing
+// in this game should apply to everything at once (see the "nothing is
+// perfect, everything is useful" design note near TOWERS' maxCharges)
+function beginCharge() {
   if (G.inv.charge < 1) { message("You have no wands of charging."); return; }
-  G.inv.charge--;
-  // like the real thing, this is not a guaranteed full recharge -- each
-  // tower gets its own roll (t.lvl dice of d6), so nothing is ever a sure
-  // top-off and a level-1 tower barely benefits compared to a level-4 one
-  const roll = (t) => { let r = 0; for (let i = 0; i < t.lvl; i++) r += ri(1, 6); return r; };
-  let restored = 0;
-  for (const t of G.towers) {
-    const spec = TOWERS[t.type];
-    if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
-      t.charges = Math.min(towerMaxCharges(t), t.charges + roll(t));
-      restored++;
-    }
-    if (spec.hp && t.hp < towerMaxHp(t)) {
-      t.hp = Math.min(towerMaxHp(t), t.hp + roll(t));
-      restored++;
-    }
-    if (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t)) {
-      t.siegeHp = Math.min(towerMaxSiegeHp(t), t.siegeHp + roll(t));
-      restored++;
-    }
-    if (spec.trapHp && t.trapHp < towerMaxTrapHp(t)) {
-      t.trapHp = Math.min(towerMaxTrapHp(t), t.trapHp + roll(t));
-      restored++;
-    }
-  }
-  message(restored
-    ? "You zap the wand of charging.  Your arsenal crackles with renewed power!"
-    : "You zap the wand of charging, but nothing here needed it.");
+  setTargeting({ kind: "charge", radius: 3.0 });
+  message("Where do you want to aim the wand of charging?  (click a tile, ESC cancels)");
 }
 function beamFx(x1, y1, x2, y2, fg) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -1655,7 +1664,7 @@ function invItems() {
     { ch: "?", name: "scroll of fireball", n: G.inv.scroll, key: "r", label: "read (aimed)",  action: beginScroll },
     { ch: "!", name: "potion of haste",    n: G.inv.potion, key: "q", label: "quaff",         action: usePotion },
     { ch: "/", name: "wand of cold",       n: G.inv.wand,   key: "z", label: "zap (aimed)",   action: beginWand },
-    { ch: "/", name: "wand of charging",   n: G.inv.charge, key: "c", label: "use (charges every tower)", action: useCharge },
+    { ch: "/", name: "wand of charging",   n: G.inv.charge, key: "c", label: "zap (aimed)",    action: beginCharge },
   ].filter(it => it.n > 0);
 }
 // invItems() plus the exact screen row each one's two lines land on --
@@ -1889,7 +1898,7 @@ window.addEventListener("keydown", (e) => {
   if (G.targeting) {
     if (e.key === "Escape") {
       const kind = G.targeting.kind; setTargeting(null);
-      message("You decide against it, for now.  (" + (kind === "scroll" ? "scroll" : "wand") + " unused)");
+      message("You decide against it, for now.  (" + (kind === "scroll" ? "scroll" : "wand") + " unused)"); // "wand" covers both cold and charging
       return;
     }
     if (e.key === "Enter") { if (G.cursor.on) resolveTargeting(G.cursor.x, G.cursor.y); return; }
@@ -1925,7 +1934,7 @@ window.addEventListener("keydown", (e) => {
     case "r": beginScroll(); return;
     case "q": usePotion(); return;
     case "z": beginWand(); return;
-    case "c": useCharge(); return;
+    case "c": beginCharge(); return;
     case "R": resetGame(); return;
     case "Enter":
       if (G.cursor.on) toggleMenu(G.cursor.x, G.cursor.y);
