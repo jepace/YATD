@@ -344,18 +344,22 @@ const TOWERS = {
        kind: "trap", blocks: false, fg: "#e85050",
        desc: "burns monsters standing on it (place ON the corridor)" },
 };
-const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 3;
+const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
 const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
 
 // `flies: true` ignores every blocking tower (only rock/walls stop it --
 // see G.flowFly/creepFlow) -- the counter to a turtled tower maze.
 // `splits`: on death, a chance to spawn a weaker copy of itself
 // (`child: true` on the spawned copy stops it from splitting again).
+// `submerges`: periodically untargetable by every damage source except
+// the fireball scroll (see isSubmerged()).
 const MONSTERS = {
   r: { name: "sewer rat", hp: 9,   spd: 3.4, bounty: 2,  leak: 1,  fg: "#b8825a" },
+  x: { name: "grid bug",  hp: 5,   spd: 3.6, bounty: 1,  leak: 1,  fg: "#c8c850" },
   a: { name: "giant ant", hp: 8,   spd: 4.0, bounty: 1,  leak: 1,  fg: "#d0d050" },
   b: { name: "cave bat",  hp: 10,  spd: 4.5, bounty: 3,  leak: 1,  fg: "#a050e8", flies: true },
   k: { name: "kobold",    hp: 18,  spd: 2.2, bounty: 3,  leak: 1,  fg: "#e85050" },
+  ";": { name: "giant eel", hp: 30, spd: 2.0, bounty: 5, leak: 2,  fg: "#50a8e8", submerges: true },
   o: { name: "orc",       hp: 42,  spd: 1.8, bounty: 5,  leak: 2,  fg: "#e8a050" },
   "&": { name: "demon",   hp: 55,  spd: 1.7, bounty: 9,  leak: 2,  fg: "#e850e8",
          splits: true, splitChance: 0.5, splitHpFrac: 0.4 },
@@ -364,24 +368,28 @@ const MONSTERS = {
   D: { name: "red dragon",hp: 2200, spd: 0.9, bounty: 150,leak: 20, fg: "#ff5050", boss: true },
 };
 // waves: groups of {t: type, n: count, gap: seconds between spawns}.
-// Regenerated each game by genWaves(): every wave gets a point budget
-// (growing ~1.5x per wave, +-15%) spent on monster types that unlock as
-// waves go on. Wave 10 always ends with the dragon.
+// Regenerated on every new level (Dlvl) by genWaves(dlvl): every wave
+// gets a point budget (growing ~1.5x per wave, +-15%, and ~1.3x per
+// Dlvl) spent on monster types that unlock as waves go on. Wave 10
+// always ends with the dragon.
 const WAVES = [];
-function genWaves() {
+function genWaves(dlvl) {
   WAVES.length = 0;
+  const dlvlMul = Math.pow(1.3, (dlvl || 1) - 1);
   const pool = [
     { t: "r", cost: 1,  gap: 0.7,  min: 1 },
+    { t: "x", cost: 1,  gap: 0.3,  min: 1 },
     { t: "a", cost: 1,  gap: 0.35, min: 2 },
     { t: "b", cost: 2,  gap: 0.5,  min: 2 },
     { t: "k", cost: 2,  gap: 0.7,  min: 2 },
     { t: "o", cost: 5,  gap: 0.9,  min: 3 },
+    { t: ";", cost: 4,  gap: 0.8,  min: 3 },
     { t: "&", cost: 6,  gap: 1.0,  min: 4 },
     { t: "Z", cost: 8,  gap: 1.0,  min: 5 },
     { t: "T", cost: 16, gap: 1.5,  min: 7 },
   ];
   for (let w = 1; w <= 10; w++) {
-    const budget = (w === 10 ? 55 : 8 * Math.pow(1.5, w - 1)) * (0.85 + rnd() * 0.3);
+    const budget = (w === 10 ? 55 : 8 * Math.pow(1.5, w - 1)) * dlvlMul * (0.85 + rnd() * 0.3);
     const avail = pool.filter(p => w >= p.min);
     const nTypes = Math.min(avail.length, w < 3 ? ri(1, 2) : ri(2, 3));
     const chosen = [];
@@ -397,18 +405,27 @@ function genWaves() {
     WAVES.push(groups);
   }
 }
-const waveHpScale = (w) => 1 + 0.22 * (w - 1);
+const waveHpScale = (w, dlvl) =>
+  (1 + 0.22 * (w - 1)) * Math.pow(1.15, (dlvl || 1) - 1);
+// true if a submerging monster is currently underwater and safe from
+// everything except the fireball scroll
+function isSubmerged(c) {
+  const m = MONSTERS[c.type];
+  return !!m.submerges && ((G.time + c.subPhase) % 4) < 1.5;
+}
+
+const MAX_DLVL = 5;   // clearing wave 10 here brings the real dragon fight
 
 // generate the first dungeon now (title screen shows it); resetGame
 // reuses it for the first game, then regenerates for every game after
 let levelFresh = true;
 genLevel();
-genWaves();
+genWaves(1);
 
 /* ---------- game state ---------- */
 const G = {
   state: "title",          // title | build | wave | won | lost
-  gold: 40, hp: 20, maxHp: 20,
+  gold: 40, hp: 20, maxHp: 20, dlvl: 1,
   wave: 0, score: 0, kills: 0,
   towers: [], creeps: [], fx: [], flow: null, flowFly: null,
   spawnQueue: [], spawnTimer: 0,
@@ -430,8 +447,9 @@ function message(s) {
 }
 
 function resetGame() {
+  G.dlvl = 1;
   if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
-  else { genLevel(); genWaves(); }         // every later game is a new one
+  else { genLevel(); genWaves(G.dlvl); }   // every later game is a new one
   G.seed = SEED;
   G.inv = { scroll: 0, potion: 0, wand: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
@@ -442,6 +460,25 @@ function resetGame() {
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+}
+
+// clearing wave 10 on a level below MAX_DLVL brings a fresh dungeon and
+// a harder wave set instead of ending the game; gold, score, and HP
+// (with a small stairwell heal) carry over, towers do not -- it's a new
+// map, rebuild your maze
+function descend() {
+  G.dlvl++;
+  genLevel();
+  genWaves(G.dlvl);
+  G.wave = 0;
+  G.towers = []; G.creeps = []; G.fx = [];
+  G.spawnQueue = []; G.selTower = null; G.selType = 0;
+  G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
+  G.flow = computeFlow();
+  G.flowFly = computeFlow(null, true);
+  G.state = "build";
+  message("You descend to Dlvl " + G.dlvl +
+    "...  the air grows colder and the dark feels less empty.");
 }
 
 function startWave() {
@@ -476,7 +513,9 @@ function advanceTarget(c) {
 }
 function spawnCreep(type) {
   const m = MONSTERS[type];
-  const scale = m.boss ? 1 : waveHpScale(G.wave);   // boss HP is flat
+  // boss HP is flat across waves within a level (a short random path
+  // must not make wave 10 unwinnable), but still grows with depth
+  const scale = m.boss ? Math.pow(1.15, G.dlvl - 1) : waveHpScale(G.wave, G.dlvl);
   const [sx, sy] = ENTRANCE;
   const c = {
     type, x: sx, y: sy, nx: sx, ny: sy, t: 0,
@@ -484,6 +523,7 @@ function spawnCreep(type) {
     maxHp: Math.round(m.hp * scale),
     spd: m.spd * (0.85 + rnd() * 0.3),   // don't all march in lockstep
     jit: ri(-1, 1),                      // a persistent lane, +-1 cell
+    subPhase: rnd() * 4,                 // submerge cycle offset (eels)
     slowUntil: 0, hitFlash: 0,
   };
   advanceTarget(c);
@@ -576,7 +616,8 @@ function spawnChild(parent, m) {
     type: parent.type, x: parent.x, y: parent.y, nx: parent.x, ny: parent.y, t: 0,
     hp: Math.max(1, Math.round(parent.maxHp * m.splitHpFrac)),
     maxHp: Math.max(1, Math.round(parent.maxHp * m.splitHpFrac)),
-    spd: parent.spd, jit: ri(-1, 1), slowUntil: 0, hitFlash: 0, child: true,
+    spd: parent.spd, jit: ri(-1, 1), subPhase: rnd() * 4,
+    slowUntil: 0, hitFlash: 0, child: true,
   };
   advanceTarget(child);
   G.creeps.push(child);
@@ -656,7 +697,8 @@ function updateTowers(dt) {
     const dmg = towerDmg(t), range = towerRange(t);
     if (spec.kind === "trap") {
       const victims = G.creeps.filter(c => {
-        const [x, y] = creepCell(c); return !c.dead && x === t.x && y === t.y;
+        const [x, y] = creepCell(c);
+        return !c.dead && !isSubmerged(c) && x === t.x && y === t.y;
       });
       if (victims.length) {
         for (const c of victims) damageCreep(c, dmg);
@@ -667,7 +709,7 @@ function updateTowers(dt) {
     }
     // pick target(s) furthest along (closest to the exit) within range and LOS
     let targets = G.creeps.filter(c => {
-      if (c.dead) return false;
+      if (c.dead || isSubmerged(c)) return false;
       const [x, y] = creepCell(c);
       return Math.hypot(x - t.x, y - t.y) <= range && hasLineOfSight(t.x, t.y, x, y);
     }).sort((a, b) => creepProgress(a) - creepProgress(b));
@@ -687,7 +729,7 @@ function updateTowers(dt) {
       const c0 = targets[0];
       const [cx, cy] = creepCell(c0);
       for (const c of G.creeps) {
-        if (c.dead) continue;
+        if (c.dead || isSubmerged(c)) continue;
         const [x, y] = creepCell(c);
         if (Math.hypot(x - cx, y - cy) <= spec.splash &&
             hasLineOfSight(cx, cy, x, y)) damageCreep(c, dmg);
@@ -754,10 +796,15 @@ function update(dt) {
   if (G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
     // wave cleared
     const bonus = 10 + G.wave * 2;
-    G.gold += bonus; G.score += 100 * G.wave;
+    G.gold += bonus; G.score += 100 * G.wave * G.dlvl;
     if (G.wave >= WAVES.length) {
-      G.state = "won";
-      G.score += G.hp * 50;
+      if (G.dlvl >= MAX_DLVL) {
+        G.state = "won";
+        G.score += G.hp * 50;
+      } else {
+        descend();
+        if (G.autoStart) startWave();
+      }
     } else {
       G.state = "build";
       message("The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids." +
@@ -799,14 +846,15 @@ function drawGame() {
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
     const empty = spec.maxCharges && Math.floor(t.charges) < 1;
-    const bright = ["", "", "#ffffff", "#ffd0ff"][t.lvl] || spec.fg;
+    const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000"][t.lvl] || spec.fg;
     const fg = empty ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
     put(t.x, MAPY + t.y, spec.ch, fg, t === G.selTower ? "#243024" : undefined);
   }
   for (const c of G.creeps) {
     const [x, y] = creepCell(c);
     const m = MONSTERS[c.type];
-    put(x, MAPY + y, c.type, c.hitFlash > 0 ? "#ffffff" : m.fg);
+    const fg = c.hitFlash > 0 ? "#ffffff" : (isSubmerged(c) ? "#2a4a5a" : m.fg);
+    put(x, MAPY + y, c.type, fg);
   }
   for (const f of G.fx)
     for (const [x, y] of f.cells)
@@ -827,7 +875,7 @@ function drawGame() {
   const auto = (G.autoStart ? "  [auto]" : "") +
                (G.time < G.hasteUntil ? "  [haste]" : "");
   text(0, 22,
-    ("Dlvl:1  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
+    ("Dlvl:" + G.dlvl + "  $:" + G.gold + "  HP:" + G.hp + "(" + G.maxHp + ")  Wave:" +
      G.wave + "/" + WAVES.length + "  Kills:" + G.kills + "  Score:" + G.score +
      spd + auto).padEnd(COLS).slice(0, COLS), "#c8d8b8");
   if (G.paused) {
@@ -880,12 +928,12 @@ function drawHelp() {
   overlayBox(x0, y0, w, h);
   const lines = [
     "--------------------- YATD Help ---------------------",
-    "Monsters route live around towers you place -- there is",
-    "no fixed path. Each leak costs you HP.",
+    "Monsters route live around towers -- no fixed path. Each",
+    "leak costs HP. Clear wave 10 to descend (up to Dlvl " + MAX_DLVL + ").",
     "",
-    "TOWERS -- press 1-4, click/ENTER a tile (press the number",
-    "again before each new placement). 1-3 block their tile",
-    "and need line of sight; you can't wall off the stairs.",
+    "TOWERS -- 1-4 to ready, click/ENTER to build (press the",
+    "number again each time). 1-3 block & need LOS. Enchant (u)",
+    "up to L" + MAX_LVL + " for more dmg/range/(wand) charges.",
     " 1 / Wand of Striking  $10  bolts, limited charges, recharges",
     " 2 0 Acid Blob         $25  splash, blocks, needs LOS",
     " 3 { Frost Fountain    $20  slows, blocks, needs LOS",
@@ -895,8 +943,9 @@ function drawHelp() {
     "KEYS: SPACE wave/pause  u upgrade  s sell  a auto  Ctrl-P log",
     "      hjkl/arrows+ENTER cursor  + - speed  R restart",
     "",
-    "MONSTERS: r rat  a ant  b bat (flies!)  k kobold  o orc",
-    "  & demon (splits!)  Z zombie  T troll (regen!)  D dragon",
+    "MONSTERS: r rat  x bug  a ant  b bat(flies!)  k kobold",
+    "  ; eel(submerges!)  o orc  & demon(splits!)  Z zombie",
+    "  T troll(regen!)  D dragon(boss)",
   ];
   lines.forEach((s, i) => text(x0 + 2, y0 + i + 1, s, "#c8e8b8"));
 }
@@ -959,10 +1008,10 @@ function drawWon() {
   drawCentered([
     "*  *  *  V I C T O R Y  *  *  *",
     "",
-    "The dragon falls.  The staircase crumbles behind it.",
+    "The last dragon falls.  The staircase crumbles behind it.",
     "You feel the dungeon's gratitude wash over you.",
     "",
-    "You ascend to demigodhood...",
+    "You ascend to demigodhood, having cleared Dlvl " + G.dlvl + "...",
     "",
     "Final score: " + G.score + "   Kills: " + G.kills + "   HP left: " + G.hp,
     "",
@@ -971,6 +1020,9 @@ function drawWon() {
 }
 function drawLost() {
   clearBuf();
+  const dtext = "Dlvl " + G.dlvl + ", wave " + G.wave;
+  const padL = Math.floor(Math.max(0, 18 - dtext.length) / 2);
+  const padR = Math.max(0, 18 - dtext.length) - padL;
   drawCentered([
     "               ----------",
     "              /          \\",
@@ -982,7 +1034,7 @@ function drawLost() {
     "          |    " + String(G.score).padStart(6) + " points   |",
     "          |   overrun by a   |",
     "          |   monster horde  |",
-    "          |     wave " + String(G.wave).padStart(2) + "      |",
+    "          |" + " ".repeat(padL) + dtext + " ".repeat(padR) + "|",
     "         *|     *  *  *      | *",
     " ________)/\\\\_//(\\/(/\\)/\\//\\/|_)_______",
   ], 3, "#a8b8a8");

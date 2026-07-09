@@ -18,10 +18,16 @@ whatever you build. Every monster that descends costs you HP. Conjure
 towers to block and defend the dungeon, enchant them, and survive all 10
 waves — the last one brings a red dragon.
 
-Like NetHack, **every game is different**: the dungeon layout is
-procedurally generated, wave compositions are randomized, and monsters
-randomly drop items. Add `?seed=N` to the URL to replay a particular
-dungeon (the seed is shown on the title screen).
+Clear wave 10 and you descend to the next dungeon level instead of the
+game ending: a brand new map, a harder wave set, and the same gold and
+HP you finished with (plus a small heal for the stairs down). Do that
+five times — Dlvl 5 — and you win. Towers don't carry over between
+levels, so every floor is a fresh maze to build.
+
+Like NetHack, **every game is different**: every dungeon level is
+freshly procedurally generated, wave compositions are randomized, and
+monsters randomly drop items. Add `?seed=N` to the URL to replay a
+particular first dungeon (the seed is shown on the title screen).
 
 ## Items
 
@@ -61,15 +67,18 @@ all from `<` to `>`. The fire trap is the exception — it lies flush with
 the floor, doesn't block anything, and only goes directly on a corridor
 or doorway tile where something will actually walk over it.
 
-Towers can be enchanted twice (`u`) for more damage and range, or sold
-(`s`) for a 70% refund.
+Towers can be enchanted up to level 4 (`u`) for more damage, range, and
+(wands) charges, or sold (`s`) for a 70% refund.
 
 ## Monsters
 
-`r` sewer rat · `a` giant ant · `b` cave bat (**flies over your
-towers** — the counter to turtling behind a wall) · `k` kobold · `o` orc
-· `&` demon (splits into a weaker copy when killed) · `Z` zombie ·
-`T` troll (regenerates!) · `D` red dragon (the boss)
+`r` sewer rat · `x` grid bug (weak but fast and cheap) · `a` giant ant ·
+`b` cave bat (**flies over your towers** — the counter to turtling
+behind a wall) · `k` kobold · `;` giant eel (**submerges** — periodically
+untargetable by everything except a scroll of fireball) · `o` orc ·
+`&` demon (splits into a weaker copy when killed) · `Z` zombie ·
+`T` troll (regenerates!) · `D` red dragon (the boss, tougher on every
+dungeon level)
 
 ## Controls
 

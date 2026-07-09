@@ -48,28 +48,39 @@ The `<script>` is organized top-to-bottom in sections (marked with
 3. **Data tables** — `TOWERS` (1–4, keyed by hotkey; glyphs are always
    NetHack object-class punctuation — `/` `0` `{` `^` — never a letter,
    since letters are reserved for monsters), `MONSTERS` (keyed by
-   their map glyph: `r a b k o & Z T D`). Two monster flags interact with
-   the pathfinding/combat systems: `flies: true` (currently only the bat)
-   makes a creep use `G.flowFly` instead of `G.flow` — see the
-   pathfinding note below, this is the counter to a turtled tower maze,
-   it ignores blocking towers entirely (still stopped by rock/walls);
-   `splits: true` + `splitChance`/`splitHpFrac` (currently only the
-   demon) spawns a weaker copy of itself on death via `spawnChild()`,
-   which sets `child: true` on the copy so it can't chain-split. `WAVES`
-   is regenerated per game by `genWaves()`: each wave spends a point
-   budget (~8×1.5^(w−1), ±15%) on 1–3 monster types from a pool gated by
-   minimum wave (`min`); wave 10 always appends the dragon. `waveHpScale(w)`
-   scales monster HP per wave — but NOT the boss (`m.boss` → flat HP), or
-   random short paths make wave 10 unwinnable. **Balance lives in these
-   tables and `genWaves`'s budget curve** — tune there, not in the logic.
+   their map glyph: `r x a b k ; o & Z T D`). Monster flags that interact
+   with the pathfinding/combat systems: `flies: true` (bat) makes a
+   creep use `G.flowFly` instead of `G.flow` — see the pathfinding note
+   below, this is the counter to a turtled tower maze, it ignores
+   blocking towers entirely (still stopped by rock/walls); `splits: true`
+   + `splitChance`/`splitHpFrac` (demon) spawns a weaker copy of itself
+   on death via `spawnChild()`, which sets `child: true` on the copy so
+   it can't chain-split; `submerges: true` (eel) makes `isSubmerged(c)`
+   (a per-creep `c.subPhase`-offset time cycle, `% 4 < 1.5`) return true
+   ~40% of the time, during which it's excluded from every damage
+   source's targeting filter (trap victims, bolt/splash/slow targets,
+   splash's secondary AoE loop) EXCEPT `useScroll()`'s fireball, which
+   intentionally ignores submersion — if you add a new AoE/instant-hit
+   effect, decide deliberately whether it should respect submersion and
+   say so in a comment, since it's easy to forget one of the four
+   existing filter sites when adding a fifth. `WAVES` is regenerated on
+   every new level by `genWaves(dlvl)`: each wave spends a point budget
+   (~8×1.5^(w−1) × 1.3^(dlvl−1), ±15%) on 1–3 monster types from a pool
+   gated by minimum wave (`min`); wave 10 always appends the dragon.
+   `waveHpScale(w, dlvl)` scales monster HP per wave and per depth — but
+   the *per-wave* factor never applies to the boss (`m.boss` → only the
+   *per-dlvl* factor, `Math.pow(1.15, dlvl-1)`, computed inline in
+   `spawnCreep`), or random short paths make wave 10 unwinnable.
+   **Balance lives in these tables and `genWaves`'s budget curve** — tune
+   there, not in the logic.
    The Wand of Striking tower (`TOWERS[1]`) has limited `maxCharges`,
-   scaling with level via `towerMaxCharges(t)` (×1.5 per level) and
-   regenerating passively at `CHARGE_REGEN` charges/sec even while off
-   cooldown or mid-wave; enchanting a wand (`upgradeTower`) refills it to
-   its new max. A depleted wand renders dimmed (`empty` check in the
-   tower draw loop) and simply stops firing — `updateTowers` `continue`s
-   past it without resetting `t.cd`, so it fires again the instant a
-   charge trickles back in.
+   scaling with level via `towerMaxCharges(t)` (×1.5 per level, up to
+   `MAX_LVL` = 4) and regenerating passively at `CHARGE_REGEN`
+   charges/sec even while off cooldown or mid-wave; enchanting a wand
+   (`upgradeTower`) refills it to its new max. A depleted wand renders
+   dimmed (`empty` check in the tower draw loop) and simply stops firing
+   — `updateTowers` `continue`s past it without resetting `t.cd`, so it
+   fires again the instant a charge trickles back in.
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
    `?` scroll of fireball (`r`, 45 dmg to all), `!` potion of haste
    (`q`, towers 2× rate 8s via `G.hasteUntil`), `/` wand of cold
@@ -84,6 +95,19 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
    pre-expanded into `G.spawnQueue` (`{at, t}` sorted by time) by
    `startWave()`.
+
+   **Dungeon levels:** clearing wave 10 doesn't end the game until
+   `G.dlvl >= MAX_DLVL` (5) — below that, `update()`'s wave-clear branch
+   calls `descend()` instead: `G.dlvl++`, a brand new `genLevel()` +
+   `genWaves(G.dlvl)`, towers/creeps cleared (new map, old towers make no
+   sense on it), `G.flow`/`G.flowFly` recomputed, and a small stairwell
+   heal (`+25%` of missing HP) — but gold, score, and the rest of HP
+   carry over. Only at `MAX_DLVL`'s wave 10 does the state become `won`.
+   If you add anything else that should reset per-level (as opposed to
+   per-game), it needs a line in both `resetGame()` AND `descend()` —
+   they're intentionally separate functions, not one calling the other,
+   because `resetGame()` also resets things (gold, HP, score, inventory)
+   that `descend()` must NOT touch.
 
    **Pathfinding (maze-building TD, not a fixed-path TD):** towers 1–3
    (`TOWERS[n].blocks === true`) physically occupy their tile; monsters
@@ -233,24 +257,29 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
    proximity to `YATD.getEntrance()`/`getExit()` or just try tiles in
    the rooms — since the route is now dynamic there's no fixed "path
    coverage" to rank against), start waves, assert final state is `won`.
-   **Because maps and waves are random, run at least 3 playthroughs
-   (each `resetGame()` = new dungeon) and require all to win.** If every
-   run wins with zero HP lost, difficulty is fine or could go up; if any
-   loses, tune down.
+   **A full win now means clearing 5 dungeon levels (50 waves total,
+   `MAX_DLVL`), which takes a while even at 4x speed — budget for it, or
+   for a quicker smoke test assert `G.dlvl` reaches 2 (confirms
+   `descend()` fires and the new level is playable) instead of chasing a
+   full win every time.** Because maps and waves are random, run at
+   least 3 playthroughs (each `resetGame()` = new dungeon) and require
+   all to reach the bar you picked. If every run clears with zero HP
+   lost, difficulty is fine or could go up; if any loses, tune down.
 4. Also assert: two `resetGame()` calls produce different maps/seeds,
-   loading with `?seed=N` reproduces a map, and — given the maze
-   mechanic is new and easy to get subtly wrong — that a creep never
-   gets stuck idling for an entire wave (poll `G.creeps` for any whose
-   `x,y` hasn't changed across several seconds of wall-clock/game time
-   while `G.state === "wave"`).
+   loading with `?seed=N` reproduces a map, `descend()` clears
+   `G.towers`/`G.creeps` and leaves `G.gold`/`G.score` untouched, and —
+   given the maze mechanic is new and easy to get subtly wrong — that a
+   creep never gets stuck idling for an entire wave (poll `G.creeps` for
+   any whose `x,y` hasn't changed across several seconds of wall-clock/
+   game time while `G.state === "wave"`).
 
 ## Conventions
 
 - NetHack voice everywhere: messages read like NetHack ("You feel a
   draft...", zorkmids for gold, tombstone on death). Monsters are letter
   glyphs with classic meanings; keep new ones consistent with real
-  NetHack (`;` eel, `L` lich, `x` grid bug...) — `&` demon is already
-  taken (splits on death, see section 3).
+  NetHack (`L` lich is a good next pick). `; x &` are already taken
+  (eel, grid bug, demon — see section 3).
 - Colors: phosphor-green baseline (`#3d6b3d` floors, `#50ff96` accents);
   monsters/towers get muted CRT-friendly colors, full white reserved for
   hit-flash.
