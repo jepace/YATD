@@ -336,35 +336,52 @@ const TERRAIN_COLOR = {
 // creep chips just by touching it. This is the counter to a "pipe of
 // death" corridor: a maze that's 100% safe from melee once built no
 // longer stays that way once a siege-flagged monster reaches it.
+// TOWERS[1] (Archer) is the only type available from a fresh game --
+// every other type carries `unlockCost`, a one-time flat (not dlvl-
+// scaled, unlike `towerCost`) gold payment that permanently adds it to
+// `G.unlocked` (see unlockTower()); it never re-locks and persists
+// across a descend() same as G.gold/G.plevel do. This is a second,
+// separate progression axis from player level: player level gates how
+// far a tower you already have access to can be enchanted, unlocking
+// gates whether you have access to a tower type at all.
 const TOWERS = {
-  1: { ch: "/", name: "Wand of Striking", cost: 18, dmg: 5, range: 5.0, cd: 0.55,
+  1: { ch: "/", name: "Archer", cost: 18, dmg: 5, range: 5.0, cd: 0.55,
        kind: "bolt", blocks: true, maxCharges: 25, siegeHp: 30, fg: "#e8e850",
-       desc: "cheap, quick bolts; runs low on charges, recharges slowly" },
-  2: { ch: "0", name: "Acid Blob", cost: 25, dmg: 7, range: 4.0, cd: 1.2,
+       desc: "a hired archer -- quick shots, limited arrows, restocks slowly" },
+  2: { ch: "0", name: "Acid Blob", cost: 25, unlockCost: 40, dmg: 7, range: 4.0, cd: 1.2,
        kind: "splash", blocks: true, splash: 1.6, siegeHp: 45, fg: "#50e850",
        desc: "lobs acid; splash damage" },
-  3: { ch: "{", name: "Frost Fountain", cost: 20, dmg: 2, range: 3.5, cd: 0.7,
+  3: { ch: "{", name: "Frost Fountain", cost: 20, unlockCost: 35, dmg: 2, range: 3.5, cd: 0.7,
        kind: "slow", blocks: true, slow: 0.5, slowDur: 2.0, siegeHp: 35, fg: "#50c8e8",
        desc: "chills and slows nearby monsters" },
-  4: { ch: "^", name: "Fire Trap", cost: 15, dmg: 14, range: 0, cd: 0.5,
+  4: { ch: "^", name: "Fire Trap", cost: 15, unlockCost: 30, dmg: 14, range: 0, cd: 0.5,
        kind: "trap", blocks: false, trapHp: 12, fg: "#e85050",
        desc: "burns monsters standing on it (place ON the corridor) -- can be disarmed" },
-  5: { ch: "\\", name: "Wand of Lightning", cost: 30, dmg: 6, range: 4.5, cd: 0.9,
+  5: { ch: "\\", name: "Wand of Lightning", cost: 30, unlockCost: 70, dmg: 6, range: 4.5, cd: 0.9,
        kind: "chain", blocks: true, maxCharges: 12, chainCount: 2, chainRange: 3.5,
        chainFalloff: 0.6, siegeHp: 50, fg: "#c8f0ff",
        desc: "arcs to 2 more targets; limited charges, recharges slowly" },
-  6: { ch: "%", name: "Dirt Wall", cost: 8, range: 0, cd: 0,
+  6: { ch: "%", name: "Dirt Wall", cost: 8, unlockCost: 15, range: 0, cd: 0,
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
 const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
+// trims both gold income and XP together (see damageCreep) -- a single
+// economy-wide knob. Dropped to 0.75 after reports of finishing Dlvl 1
+// already at max player level, sitting on hundreds of unspent zorkmids,
+// and clearing waves without a single tower past L1 -- the early game
+// was simply too lucrative to ever feel like resources mattered.
+const BOUNTY_MULT = 0.75;
 // player level gates how far ANY tower can be enchanted, independent of
 // gold -- a fresh player level 1 can only bring towers to L1 even with
 // gold to spare, same as MAX_LVL always has, but now MAX_LVL is only
 // reachable once G.plevel itself reaches it. XP is earned per kill
 // (gainXp, called from damageCreep) and persists across a descend() the
 // same way G.gold/G.score do -- resetGame() is the only place it resets.
-const PLAYER_XP_THRESHOLDS = [0, 60, 180, 400]; // cumulative xp for player level 1,2,3,4
+// Thresholds are deliberately steep past level 2: reaching MAX_LVL (4)
+// should feel like a real milestone earned over multiple dungeon levels,
+// not something that happens by wave 9 of Dlvl 1.
+const PLAYER_XP_THRESHOLDS = [0, 100, 300, 800]; // cumulative xp for player level 1,2,3,4
 function playerLevelForXp(xp) {
   let lvl = 1;
   for (let i = 1; i < PLAYER_XP_THRESHOLDS.length; i++) if (xp >= PLAYER_XP_THRESHOLDS[i]) lvl = i + 1;
@@ -619,6 +636,7 @@ const G = {
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
   inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
+  unlocked: { 1: true },               // tower types permanently bought with unlockTower()
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
 };
@@ -669,7 +687,7 @@ function resetGame() {
   G.seed = SEED;
   G.inv = { scroll: 0, potion: 0, wand: 0, charge: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
-  G.score = 0; G.kills = 0; G.xp = 0; G.plevel = 1;
+  G.score = 0; G.kills = 0; G.xp = 0; G.plevel = 1; G.unlocked = { 1: true };
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
   G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
@@ -772,6 +790,7 @@ function creepProgress(c) {
 
 function buildTower(type, x, y) {
   const spec = TOWERS[type];
+  if (!G.unlocked[type]) { message("You haven't learned to conjure a " + spec.name + " yet."); return false; }
   const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
   if (!ok) {
     message(spec.kind === "trap"
@@ -793,8 +812,22 @@ function buildTower(type, x, y) {
   if (spec.trapHp) t.trapHp = spec.trapHp;
   G.towers.push(t);
   if (spec.blocks) G.flow = computeFlow();
-  message("You conjure a " + spec.name + ".");
+  message("You conjure " + (type === 1 ? "an" : "a") + " " + spec.name + ".");
   return true;
+}
+// permanently unlocks a tower TYPE (not a specific tower) for the rest of
+// the game -- a one-time flat cost, separate from towerCost's per-build
+// dlvl scaling, and never re-locked; see the TOWERS comment above
+function unlockTower(type) {
+  const spec = TOWERS[type];
+  if (G.unlocked[type]) return;
+  if (G.gold < spec.unlockCost) {
+    message("Learning the " + spec.name + " costs " + spec.unlockCost + " zorkmids; you are short.");
+    return;
+  }
+  G.gold -= spec.unlockCost;
+  G.unlocked[type] = true;
+  message("You've learned to conjure a " + spec.name + "!");
 }
 function upgradeTower(t) {
   if (!t) return;
@@ -852,8 +885,14 @@ function menuOptions(x, y) {
   for (let n = 1; n <= 6; n++) {
     const spec = TOWERS[n];
     const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
-    if (ok) opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + towerCost(n) + ")",
-                         action: () => buildTower(n, x, y) });
+    if (!ok) continue;
+    if (!G.unlocked[n]) {
+      opts.push({ key: String(n), label: "Unlock " + spec.ch + " " + spec.name + " ($" + spec.unlockCost + ", one-time)",
+                  action: () => unlockTower(n), keepOpen: true });
+    } else {
+      opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + towerCost(n) + ")",
+                  action: () => buildTower(n, x, y) });
+    }
   }
   return { tower: null, opts };
 }
@@ -894,15 +933,19 @@ function damageCreep(c, dmg, dtype) {
     const m = MONSTERS[c.type];
     const [cx, cy] = creepCell(c);
     deathFx(cx, cy, m.fg);
-    G.gold += m.bounty; G.kills++; G.score += m.bounty * 10;
+    // BOUNTY_MULT trims both gold income and XP together (gainXp uses the
+    // same trimmed amount) -- a single economy-wide knob rather than
+    // hand-editing all ~30 monsters' bounty fields individually
+    const bounty = Math.round(m.bounty * BOUNTY_MULT);
+    G.gold += bounty; G.kills++; G.score += bounty * 10;
     if (m.boss) {
       message("The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--");
       G.paused = true;
     }
-    else message("The " + m.name + " is destroyed. (+" + m.bounty + " zorkmids)");
+    else message("The " + m.name + " is destroyed. (+" + bounty + " zorkmids)");
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
-    gainXp(m.bounty); // called last so a level-up's --More-- message wins over the kill message
+    gainXp(bounty); // called last so a level-up's --More-- message wins over the kill message
   }
 }
 // a lesser copy that claws free of a split monster's corpse -- carries
@@ -1476,12 +1519,12 @@ function drawHelp() {
     "--------------------- YATD Help ---------------------",
     "Click a tile (or ENTER on the cursor) for a menu of",
     "what to do there. Monsters route live, no fixed path.",
-    " 1 / Wand of Striking  $18  bolts, limited charges",
-    " 2 0 Acid Blob         $25  splash, blocks, LOS",
-    " 3 { Frost Fountain    $20  slows, blocks, LOS",
-    " 4 ^ Fire Trap         $15  ON the corridor #, no block",
-    " 5 \\ Wand of Lightning $30  arcs to 2 more, limited charges",
-    " 6 % Dirt Wall         $8   pure block, hp, no combat",
+    " 1 / Archer            $18  bolts, limited arrows -- free from start",
+    " 2 0 Acid Blob         $25  splash, blocks, LOS -- unlock $40",
+    " 3 { Frost Fountain    $20  slows, blocks, LOS -- unlock $35",
+    " 4 ^ Fire Trap         $15  ON the corridor #  -- unlock $30",
+    " 5 \\ Wand of Lightning $30  arcs to 2 more     -- unlock $70",
+    " 6 % Dirt Wall         $8   pure block, hp      -- unlock $15",
     "Enchant up to L" + MAX_LVL + " in the menu -- capped by Lv (kill XP).",
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",
@@ -1799,7 +1842,7 @@ window.addEventListener("keydown", (e) => {
 // hooks for automated testing. ENTRANCE/EXIT/flow are exposed as getters
 // since the underlying `let` bindings are reassigned wholesale on every
 // resetGame() -- a plain property here would go stale after the first game.
-window.YATD = { buildTower, upgradeTower, sellTower, startWave, resetGame,
+window.YATD = { buildTower, upgradeTower, sellTower, unlockTower, startWave, resetGame,
                 buildable, trapPlaceable, towerAt, path, map,
                 getEntrance: () => ENTRANCE, getExit: () => EXIT,
                 getFlow: () => G.flow, getFlowFly: () => G.flowFly,

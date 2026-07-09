@@ -52,19 +52,32 @@ Tower glyphs are always NetHack object-class punctuation, never a
 letter — letters are reserved for monsters, so nothing on the map is
 ever ambiguous about what it is.
 
-| Key | Glyph | Tower             | Cost | What it does                          |
-|-----|-------|-------------------|------|---------------------------------------|
-| `1` | `/`   | Wand of Striking  | $18  | Fast single-target bolts, limited charges |
-| `2` | `0`   | Acid Blob         | $25  | Lobbed splash damage                   |
-| `3` | `{`   | Frost Fountain    | $20  | Chills and slows monsters in range     |
-| `4` | `^`   | Fire Trap         | $15  | Burns monsters — place ON the corridor |
-| `5` | `\`   | Wand of Lightning | $30  | Arcs to 2 more targets after the first |
-| `6` | `%`   | Dirt Wall         | $8   | Pure obstacle, no offense — see below  |
+| Key | Glyph | Tower             | Cost | Unlock | What it does                    |
+|-----|-------|-------------------|------|--------|----------------------------------|
+| `1` | `/`   | Archer            | $18  | free   | Fast single-target bolts, limited arrows |
+| `2` | `0`   | Acid Blob         | $25  | $40    | Lobbed splash damage             |
+| `3` | `{`   | Frost Fountain    | $20  | $35    | Chills and slows monsters in range |
+| `4` | `^`   | Fire Trap         | $15  | $30    | Burns monsters — place ON the corridor |
+| `5` | `\`   | Wand of Lightning | $30  | $70    | Arcs to 2 more targets after the first |
+| `6` | `%`   | Dirt Wall         | $8   | $15    | Pure obstacle, no offense — see below |
 
 Prices above are Dlvl 1 baseline — every build and enchant costs more
 the deeper you descend (gold you're still holding onto by Dlvl 5 buys
 noticeably less than it did up top), so don't bank on stockpiling early
 and coasting on it later.
+
+**Only the Archer is available from a fresh game.** Every other tower
+type has to be unlocked first with a one-time gold payment — the
+tile-action menu shows `Unlock <tower> ($cost, one-time)` in place of
+the normal build option on any tile where that tower could go, and
+paying it adds the type to your toolkit for the rest of the run (it
+never re-locks, and survives descending to the next dungeon level —
+only a full restart resets it). Unlock cost is separate from the
+per-build price above and doesn't scale with dungeon level. This is a
+second axis of progression alongside player level: player level (see
+Monsters below) gates how far a tower you already have access to can be
+enchanted; unlocking gates whether you have access to that tower type at
+all. Which type you unlock first, and when, is a real strategic choice.
 
 Both wands run on charges — they fire until dry, then sit idle (dimmed
 on the map) recharging slowly on their own. Enchanting one tops it back
@@ -159,9 +172,9 @@ just the one that heals noticeably faster than everything else.
 one element:** red/fire, green/acid, blue/electric, white/cold. You
 find out which by the reveal message the instant it spawns. A hallway
 lined entirely with one damage type won't reliably beat every dragon —
-keep more than one type of tower in rotation. The Wand of Striking's
-plain bolts are untyped and always land regardless of color, which is
-exactly why it's worth keeping around even once you have fancier towers.
+keep more than one type of tower in rotation. The Archer's plain bolts
+are untyped and always land regardless of color, which is exactly why
+it's worth keeping around even once you've unlocked fancier towers.
 
 ## Controls
 

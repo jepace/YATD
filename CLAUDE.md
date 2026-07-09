@@ -115,9 +115,37 @@ The `<script>` is organized top-to-bottom in sections (marked with
    always records the price actually paid, so `sellTower`'s 70% refund
    naturally reflects whatever dlvl the tower was bought at, no separate
    bookkeeping needed. **Balance lives in these tables, `genWaves`'s
-   budget curve, and `towerCost`'s dlvl exponent** — tune there, not in
-   the logic.
-   Both wand towers (`TOWERS[1]` Wand of Striking, `TOWERS[5]` Wand of
+   budget curve, `towerCost`'s dlvl exponent, and `BOUNTY_MULT`** — tune
+   there, not in the logic. `BOUNTY_MULT` (currently 0.75) trims both
+   gold income and XP together — `damageCreep()`'s kill branch computes
+   `bounty = Math.round(m.bounty * BOUNTY_MULT)` once and uses that
+   trimmed value for `G.gold`, `G.score`, the kill message, and
+   `gainXp()`, rather than the raw `MONSTERS[type].bounty`; it exists as
+   a single economy-wide knob rather than hand-editing all ~30 monsters'
+   bounty fields, added after a report of finishing Dlvl 1 already at
+   max player level with hundreds of unspent zorkmids and every tower
+   still at L1 — the early economy was simply too generous to ever feel
+   like resources mattered. `PLAYER_XP_THRESHOLDS` (section on player
+   level, above) was raised at the same time for the same reason.
+
+   **Tower unlocking** is a second progression axis, independent of
+   player level: `TOWERS[1]` (Archer) is the only type in `G.unlocked`
+   (`{ 1: true }`) on a fresh `resetGame()`; every other type carries
+   `unlockCost`, a flat one-time gold payment (NOT dlvl-scaled like
+   `towerCost`) that `unlockTower(type)` spends to permanently add it to
+   `G.unlocked` — it never re-locks and, like `G.gold`/`G.plevel`,
+   survives `descend()` and only resets in `resetGame()`. `menuOptions()`
+   dispatches on `G.unlocked[n]` for each buildable-here type: locked
+   shows an `Unlock <name> ($cost, one-time)` option (`keepOpen: true`,
+   same as upgrade/sell, so the menu naturally shows the real build
+   option on its next fresh `menuOptions()` call once you've paid);
+   unlocked shows the normal build option. `buildTower()` also checks
+   `G.unlocked[type]` directly (defense in depth for the exposed
+   `YATD.buildTower` test hook, which bypasses the menu). Player level
+   gates how far a tower you already have access to can be enchanted;
+   unlocking gates whether you have access to the type at all — don't
+   conflate the two when adding a 7th tower type.
+   Both charge-limited towers (`TOWERS[1]` Archer, `TOWERS[5]` Wand of
    Lightning) have limited `maxCharges`, scaling with level via
    `towerMaxCharges(t)` (×1.5 per level, up to `MAX_LVL` = 4) and
    regenerating passively at `CHARGE_REGEN` charges/sec even while off

@@ -19,6 +19,17 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Tower unlocking, and an early-game economy tune-down.** A second
+  progression axis alongside player level: only the Archer (`TOWERS[1]`,
+  renamed from Wand of Striking) is available from a fresh game — every
+  other tower type needs a one-time flat gold payment
+  (`unlockTower(type)`, `TOWERS[n].unlockCost`) before it shows up as
+  buildable, permanently, surviving `descend()` same as gold/player
+  level. See `CLAUDE.md` section 3. Alongside it: `BOUNTY_MULT` (0.75)
+  now trims gold income and XP together, and `PLAYER_XP_THRESHOLDS` was
+  raised, after a report of reaching max player level and a huge gold
+  surplus by wave 9 of Dlvl 1 with every tower still at L1 — the early
+  economy was too generous to ever feel like resources mattered.
 - **Siege monsters, trap disarming, player XP levels, and monster lore.**
   Four related additions in one pass:
   - Tower-smashing monsters (`siege: true` — orc captain, troll/troll
