@@ -12,14 +12,25 @@ of cold / gold piles) with an `i` inventory overlay, a `Ctrl-P` message
 log (NetHack-style — replaced the old floating "+2$" combat text
 entirely; all events are `message()` calls now), non-sticky tower
 placement (`1`-`4` must be pressed again before each build), creep lane
-variation in rooms (`jit`), and line-of-sight for ranged towers
-(`hasLineOfSight`, walls block shots — traps are exempt). New item ideas
-should extend `dropItem()` and the `G.inv` + `r/q/z` key pattern. New
-overlays should follow the `G.overlay` + `overlayBox()` pattern in
+variation in rooms (`jit`), line-of-sight for ranged towers
+(`hasLineOfSight`, walls block shots — traps are exempt), and **live
+maze-building pathfinding**: towers 1-3 physically block their tile and
+monsters route around them via a BFS flow field recomputed on every
+build/sell (`computeFlow`/`G.flow`), with `wouldSealPath` refusing any
+placement that would wall the stairs shut entirely. See `CLAUDE.md`
+section 4 before touching monster movement or tower placement rules —
+it's easy to introduce a softlock (a wave that can never finish because
+a creep has no route) if you change the connectivity check without
+understanding it first. New item ideas should extend `dropItem()` and
+the `G.inv` + `r/q/z` key pattern. New overlays should follow the
+`G.overlay` + `overlayBox()` pattern in
 `drawHelp`/`drawInventory`/`drawLog` — see `CLAUDE.md` section 6. New
 towers must use NetHack object-class punctuation for their glyph, never
 a letter — letters are exclusively monsters now (see `CLAUDE.md` section
-3); idea 7 below has been updated to match.
+3); idea 7 below has been updated to match. New blocking towers should
+set `blocks: true` in `TOWERS` and will automatically participate in the
+maze system; non-blocking (contact/aura) towers should set
+`blocks: false` like the fire trap.
 
 **Process note:** the user has asked that changes here be verified by
 code review, not by launching a headless browser to click through the
@@ -47,11 +58,13 @@ only) vs. when full browser verification is still warranted.
 
 ## Medium
 
-5. **Wand of Digging (consumable).** Player buys a one-shot item that
-   carves a shortcut corridor between two chosen rock cells... for the
-   MONSTERS' benefit? No — inverted: it collapses a corridor segment,
-   forcing a longer path. Requires making `path` rebuildable (BFS over
-   corridor cells instead of the fixed waypoint walk).
+5. **Wand of Digging (consumable).** Now that movement is a live flow
+   field, this is much easier than it used to be: flip a rock `' '` cell
+   to floor `'.'` (or vice versa, collapsing a corridor into rock — check
+   `wouldSealPath`-style reachability first so you can't softlock the
+   level) and call `G.flow = computeFlow()`. Monsters crossing that area
+   will pick up the new route on their next `advanceTarget()` call
+   automatically, no other changes needed.
 6. **Cursed/blessed waves.** Random modifiers announced in advance ("You
    feel a malignant aura..."): monsters hasted, towers -25% range, double
    bounty, fog (map dimmed outside tower ranges). One modifier every few
@@ -85,6 +98,8 @@ only) vs. when full browser verification is still warranted.
 
 - Frameworks, bundlers, npm deps, external fonts/CDNs — the single
   self-contained file is a core feature.
-- Free creep pathfinding around towers ("maze-building" TD) — YATD is a
-  fixed-path TD by design; towers go in rooms, traps on corridors.
 - DOM-per-cell rendering — canvas is faster and simpler.
+
+(Maze-building pathfinding was previously on this list as rejected —
+it's now shipped, see the top of this file. Towers block, monsters
+route around them live.)

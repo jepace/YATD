@@ -33,8 +33,17 @@ The `<script>` is organized top-to-bottom in sections (marked with
      replays a dungeon (first game only); seed shown on title screen.
      `resetGame()` regenerates level+waves except for the very first game
      (`levelFresh`), so the title backdrop matches game one.
-   - Placement rules: `buildable(x,y)` = room floor off-path;
-     `trapPlaceable(x,y)` = on-path corridor/door. Both exclude occupied.
+   - `path`/`pathIdx` are **generation-time only** now (room seeding,
+     quality scoring, fountain placement) — they do NOT constrain runtime
+     tower placement or monster movement; see the pathfinding note in
+     section 4. `ENTRANCE`/`EXIT` (the `<`/`>` cells) are the real runtime
+     anchors, set by `buildLevel()`.
+   - Placement rules: `buildable(x,y)` = any room floor `.` tile, not
+     already occupied by a tower or a creep (current cell OR the cell
+     it's already committed to stepping into); `trapPlaceable(x,y)` =
+     any corridor/door tile, unoccupied by a tower (creeps are fine to
+     trap under — traps don't block). Both can now target tiles monsters
+     actually walk over — see section 4.
 
 3. **Data tables** — `TOWERS` (1–4, keyed by hotkey; glyphs are always
    NetHack object-class punctuation — `/` `0` `{` `^` — never a letter,
@@ -59,15 +68,52 @@ The `<script>` is organized top-to-bottom in sections (marked with
 4. **Game state** — the global `G` object (also `window.G` for tests).
    `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
    pre-expanded into `G.spawnQueue` (`{at, t}` sorted by time) by
-   `startWave()`. Creeps store `prog`, a float index into `path`, plus a
-   per-creep `spd` variance (±15%) and a persistent `jit` lane (-1/0/1)
-   so they don't all march in perfect lockstep. `creepCell(c)` is the
-   single source of truth for a creep's actual cell — it applies `jit`
-   via `pathPerp(idx)` ONLY when the base path cell is room floor `.`
-   (never in 1-wide corridors, so trap alignment and targeting stay
-   exact); it's used for everything: rendering, tower targeting, trap
-   collision, and leak/hover checks. No pathfinding exists or is needed —
-   the path is fixed.
+   `startWave()`.
+
+   **Pathfinding (maze-building TD, not a fixed-path TD):** towers 1–3
+   (`TOWERS[n].blocks === true`) physically occupy their tile; monsters
+   have no fixed route and instead follow a BFS flow field recomputed
+   from scratch by `computeFlow()` every time a blocking tower is built
+   or sold (`G.flow = computeFlow()`, stored on `G`, `{dist, next}`
+   indexed `[y][x]`) — `dist` is steps-to-exit, `next` is which
+   neighboring cell to step toward. `terrainWalkable(x,y)` (rock/walls
+   only excluded — corridors, rooms, doors, decorative fountains are all
+   walkable) defines the graph; blocking towers are the only dynamic
+   obstacles. `buildTower()` calls `wouldSealPath(x,y)` (a `computeFlow`
+   dry-run with the candidate cell pre-blocked) before committing to a
+   *blocking* tower placement — if the entrance would become unreachable
+   from the exit, the build is refused with a message; this is the only
+   thing stopping a player from walling the stairs shut. The fire trap
+   (`blocks: false`) never triggers this check — it's flush with the
+   floor, monsters walk over it, `trapPlaceable` doesn't care about
+   connectivity.
+
+   Creeps move cell-to-cell: `c.x,c.y` = current cell, `c.nx,c.ny` = the
+   cell they're already committed to stepping into (from
+   `advanceTarget(c)`, looked up fresh from `G.flow.next` every time they
+   finish a step — this is how they react live to a tower appearing
+   mid-wave), `c.t` = progress toward that step in `[0,1)`, incremented
+   by `spd*dt` in `updateCreeps` and consumed via a `while (c.t >= 1)`
+   loop (handles multiple cells crossed in one frame at high speed/game
+   speed). A creep is considered to have LEAKED the instant it steps onto
+   `EXIT`. Creeps also carry a per-creep `spd` variance (±15%) and a
+   persistent `jit` lane (-1/0/1) so they don't all march in lockstep.
+   `creepCell(c)` is the single source of truth for a creep's actual
+   cell — it applies `jit` as a perpendicular offset from the creep's
+   current travel direction (`c.nx-c.x, c.ny-c.y`) ONLY when the base
+   cell is room floor `.` (never in 1-wide corridors, so trap alignment
+   and targeting stay exact); it's used for everything: rendering, tower
+   targeting, trap collision, and leak/hover checks. `creepProgress(c)`
+   (flow distance minus `c.t`) replaces the old "furthest along the
+   path" sort key for tower targeting — lower is closer to the exit.
+
+   **If you touch this system:** any change to `buildable`/`trapPlaceable`
+   or to when `G.flow` gets recomputed needs to preserve the invariant
+   that `wouldSealPath` is checked before every *blocking* placement —
+   skipping it lets the player permanently softlock a wave (monsters
+   spawn with no route and `advanceTarget` returns `nx===x,ny===y`,
+   which `updateCreeps` handles by having them idle in place rather than
+   crashing, but that's a bug state, not a feature).
 
 5. **Combat** — `updateTowers(dt)` handles all four tower kinds (`bolt`,
    `splash`, `slow`, `trap`); targeting is "furthest along path in
@@ -133,11 +179,16 @@ where static reading genuinely can't tell you the outcome (new physics/
 collision math, procedural generation quality, anything touching win/
 loss balance). When that's asked for:
 
-`window.G` (live state) and `window.YATD` (API: `buildTower`,
-`upgradeTower`, `sellTower`, `startWave`, `resetGame`, `buildable`,
-`trapPlaceable`, `towerAt`, `path`, `map`) are exposed as test hooks —
-keep them working. Verify with headless Chromium (Playwright); this
-pattern works in the Claude Code cloud environment:
+`window.G` (live state, including `G.flow`) and `window.YATD` (API:
+`buildTower`, `upgradeTower`, `sellTower`, `startWave`, `resetGame`,
+`buildable`, `trapPlaceable`, `towerAt`, `path`, `map`, `wouldSealPath`,
+`getEntrance()`, `getExit()`, `getFlow()`) are exposed as test hooks —
+keep them working. `getEntrance`/`getExit`/`getFlow` are functions, not
+plain properties, because `ENTRANCE`/`EXIT`/`G.flow` are wholesale
+*reassigned* (not mutated) on every `resetGame()` — a plain property
+snapshot at export time would go stale after the first game. Verify
+with headless Chromium (Playwright); this pattern works in the Claude
+Code cloud environment:
 
 ```js
 chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
@@ -146,15 +197,27 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 1. Load the page, check for zero page/console errors, screenshot the
    title, mid-wave, victory, and tombstone screens and LOOK at them.
 2. Sanity-check via `page.evaluate`: building deducts gold, illegal
-   placement refused, traps only on path, selling refunds 70%.
+   placement refused, traps only on corridor/door tiles, selling refunds
+   70%. Also check the maze invariant directly: pick a cell adjacent to
+   the entrance, confirm `YATD.wouldSealPath(x,y)` agrees with whether
+   `YATD.buildTower(1,x,y)` actually succeeds, and confirm
+   `YATD.getFlow().dist` at the entrance stays finite after any
+   sequence of builds you make in the test.
 3. Run a full automated playthrough at `G.speed = 4`: greedily place
-   towers on tiles ranked by path coverage each build phase, start waves,
-   assert final state is `won`. **Because maps and waves are random, run
-   at least 3 playthroughs (each `resetGame()` = new dungeon) and require
-   all to win.** If every run wins with zero HP lost, difficulty is fine
-   or could go up; if any loses, tune down.
-4. Also assert: two `resetGame()` calls produce different maps/seeds, and
-   loading with `?seed=N` reproduces a map.
+   towers on the highest-value tiles each build phase (e.g. rank by
+   proximity to `YATD.getEntrance()`/`getExit()` or just try tiles in
+   the rooms — since the route is now dynamic there's no fixed "path
+   coverage" to rank against), start waves, assert final state is `won`.
+   **Because maps and waves are random, run at least 3 playthroughs
+   (each `resetGame()` = new dungeon) and require all to win.** If every
+   run wins with zero HP lost, difficulty is fine or could go up; if any
+   loses, tune down.
+4. Also assert: two `resetGame()` calls produce different maps/seeds,
+   loading with `?seed=N` reproduces a map, and — given the maze
+   mechanic is new and easy to get subtly wrong — that a creep never
+   gets stuck idling for an entire wave (poll `G.creeps` for any whose
+   `x,y` hasn't changed across several seconds of wall-clock/game time
+   while `G.state === "wave"`).
 
 ## Conventions
 

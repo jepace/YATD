@@ -12,10 +12,11 @@ python3 -m http.server   # or double-click index.html
 
 ## The pitch
 
-Monsters pour out of the up staircase `<` and march the winding corridors
-of the Dungeons of Doom toward the down staircase `>`. Every monster that
-descends costs you HP. Conjure towers on room floors, enchant them, and
-survive all 10 waves — the last one brings a red dragon.
+Monsters pour out of the up staircase `<` and find their own way to the
+down staircase `>` — there's no fixed route, they route live around
+whatever you build. Every monster that descends costs you HP. Conjure
+towers to block and defend the dungeon, enchant them, and survive all 10
+waves — the last one brings a red dragon.
 
 Like NetHack, **every game is different**: the dungeon layout is
 procedurally generated, wave compositions are randomized, and monsters
@@ -47,10 +48,16 @@ Every tower except the fire trap needs a clear line of sight — thick
 walls block shots, so a tower can't hit monsters marching down the
 corridor on the other side of a wall.
 
+The wand, acid blob, and frost fountain physically occupy their tile —
+build one in a monster's way and it routes around, same as any wall.
+Build a maze if you want, but you can never wall the stairs shut
+completely: the game refuses any placement that would leave no route at
+all from `<` to `>`. The fire trap is the exception — it lies flush with
+the floor, doesn't block anything, and only goes directly on a corridor
+or doorway tile where something will actually walk over it.
+
 Towers can be enchanted twice (`u`) for more damage and range, or sold
-(`s`) for a 70% refund. You can build anywhere on open room floor (`.`)
-except the exact corridor line monsters walk — the fire trap is the
-opposite, it only goes directly on that line.
+(`s`) for a 70% refund.
 
 ## Monsters
 
