@@ -90,8 +90,13 @@ Towers can be enchanted up to level 4 (`u`) for more damage, range,
 behind a wall) · `k` kobold · `;` giant eel (**submerges** — periodically
 untargetable by everything except a scroll of fireball) · `o` orc ·
 `&` demon (splits into a weaker copy when killed) · `Z` zombie ·
-`T` troll (regenerates!) · `D` red dragon (the boss, tougher on every
-dungeon level)
+`T` troll (**regenerates fast** — leave one half-dead and it won't stay
+that way) · `D` red dragon (the boss, tougher on every dungeon level)
+
+Every monster heals a little when left alone — like a tower recharging,
+chip damage that isn't followed up gets undone over time. It's slow
+enough that any real sustained fire still wins the race; the troll is
+just the one that heals noticeably faster than everything else.
 
 ## Controls
 

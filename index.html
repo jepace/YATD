@@ -355,13 +355,16 @@ const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
 const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
 const towerMaxHp = (t) => Math.round(TOWERS[t.type].hp * Math.pow(1.5, t.lvl - 1));
 const WALL_DPS = 6;   // how fast an adjacent creep chips a dirt wall down
+const BASE_REGEN = 0.4;   // hp/sec -- every monster heals a little if left alone
 
 // `flies: true` ignores every blocking tower (only rock/walls stop it --
 // see G.flowFly/creepFlow) -- the counter to a turtled tower maze.
 // `splits`: on death, a chance to spawn a weaker copy of itself
 // (`child: true` on the spawned copy stops it from splitting again).
 // `submerges`: periodically untargetable by every damage source except
-// the fireball scroll (see isSubmerged()).
+// the fireball scroll (see isSubmerged()). `regen`: hp/sec passive heal,
+// overriding BASE_REGEN (which every monster gets by default) -- only
+// the troll sets this, to stay distinctly the "hard to finish off" one.
 const MONSTERS = {
   r: { name: "sewer rat", hp: 9,   spd: 3.4, bounty: 2,  leak: 1,  fg: "#b8825a" },
   x: { name: "grid bug",  hp: 5,   spd: 3.6, bounty: 1,  leak: 1,  fg: "#c8c850" },
@@ -791,7 +794,9 @@ function updateCreeps(dt) {
   for (const c of G.creeps) {
     if (c.dead) continue;
     const m = MONSTERS[c.type];
-    if (m.regen && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + m.regen * dt);
+    // every monster heals slowly if left alone, same as a tower recharging
+    // -- m.regen (currently only the troll) overrides the baseline rate
+    if (c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + (m.regen || BASE_REGEN) * dt);
     c.hitFlash = Math.max(0, c.hitFlash - dt);
     let spd = c.spd;
     if (G.time < c.slowUntil) spd *= c.slowFactor;

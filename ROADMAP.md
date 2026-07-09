@@ -56,10 +56,14 @@ in `creepCell()`'s lane-jitter offset, which used to check only terrain
 and could visually place a grounded creep on top of an adjacent tower
 (never affected leak detection, which reads `c.x,c.y` directly, but did
 affect what got rendered/targeted/collided) — now also checks
-`!towerAt(vx,vy)`; and a **render fix** for flying creeps, which
+`!towerAt(vx,vy)`; a **render fix** for flying creeps, which
 legitimately CAN share a cell with a tower (that's the point of flying)
 — the creep-render loop now tints the background so it reads as "flying
-over" instead of looking like the same bug.
+over" instead of looking like the same bug; and **universal passive
+regen** (`BASE_REGEN`, 0.4 hp/sec for every monster, `m.regen` still
+overrides it for the troll at 3) — the fairness argument being that a
+tower recharges when it's not firing, so a monster should heal a little
+too when it isn't being focused down.
 
 **Process note:** the user has asked that changes here be verified by
 code review, not by launching a headless browser to click through the
