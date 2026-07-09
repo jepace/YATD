@@ -352,7 +352,10 @@ const TOWERS = {
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
 const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
-const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
+// gold buys less the deeper you go -- zorkmids you're still carrying at
+// Dlvl 5 shouldn't be worth what they were on Dlvl 1
+const towerCost = (type) => Math.round(TOWERS[type].cost * Math.pow(1.18, G.dlvl - 1));
+const upgradeCost = (t) => towerCost(t.type) * (t.lvl + 1);
 const towerMaxHp = (t) => Math.round(TOWERS[t.type].hp * Math.pow(1.5, t.lvl - 1));
 const WALL_DPS = 6;   // how fast an adjacent creep chips a dirt wall down
 const BASE_REGEN = 0.4;   // hp/sec -- every monster heals a little if left alone
@@ -409,7 +412,7 @@ function pickDragon() {
 const WAVES = [];
 function genWaves(dlvl) {
   WAVES.length = 0;
-  const dlvlMul = Math.pow(1.3, (dlvl || 1) - 1);
+  const dlvlMul = Math.pow(1.35, (dlvl || 1) - 1);
   const pool = [
     { t: "r", cost: 1,  gap: 0.7,  min: 1 },
     { t: "x", cost: 1,  gap: 0.3,  min: 1 },
@@ -440,7 +443,7 @@ function genWaves(dlvl) {
   }
 }
 const waveHpScale = (w, dlvl) =>
-  (1 + 0.22 * (w - 1)) * Math.pow(1.15, (dlvl || 1) - 1);
+  (1 + 0.22 * (w - 1)) * Math.pow(1.2, (dlvl || 1) - 1);
 // true if a submerging monster is currently underwater and safe from
 // everything except the fireball scroll
 function isSubmerged(c) {
@@ -576,7 +579,7 @@ function spawnCreep(type) {
   const m = MONSTERS[type];
   // boss HP is flat across waves within a level (a short random path
   // must not make wave 10 unwinnable), but still grows with depth
-  const scale = m.boss ? Math.pow(1.15, G.dlvl - 1) : waveHpScale(G.wave, G.dlvl);
+  const scale = m.boss ? Math.pow(1.2, G.dlvl - 1) : waveHpScale(G.wave, G.dlvl);
   const [sx, sy] = ENTRANCE;
   const c = {
     type, x: sx, y: sy, nx: sx, ny: sy, t: 0,
@@ -628,9 +631,10 @@ function buildTower(type, x, y) {
     message("A ward stops you -- that would seal the stairs completely.");
     return false;
   }
-  if (G.gold < spec.cost) { message("You cannot afford that. (" + spec.cost + " zorkmids)"); return false; }
-  G.gold -= spec.cost;
-  const t = { type, x, y, lvl: 1, cd: 0, spent: spec.cost };
+  const cost = towerCost(type);
+  if (G.gold < cost) { message("You cannot afford that. (" + cost + " zorkmids)"); return false; }
+  G.gold -= cost;
+  const t = { type, x, y, lvl: 1, cd: 0, spent: cost };
   if (spec.maxCharges) t.charges = spec.maxCharges;
   if (spec.hp) t.hp = spec.hp;
   G.towers.push(t);
@@ -686,7 +690,7 @@ function menuOptions(x, y) {
   for (let n = 1; n <= 6; n++) {
     const spec = TOWERS[n];
     const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
-    if (ok) opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + spec.cost + ")",
+    if (ok) opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + towerCost(n) + ")",
                          action: () => buildTower(n, x, y) });
   }
   return { tower: null, opts };

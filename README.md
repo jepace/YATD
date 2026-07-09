@@ -61,6 +61,11 @@ ever ambiguous about what it is.
 | `5` | `\`   | Wand of Lightning | $30  | Arcs to 2 more targets after the first |
 | `6` | `%`   | Dirt Wall         | $8   | Pure obstacle, no offense — see below  |
 
+Prices above are Dlvl 1 baseline — every build and enchant costs more
+the deeper you descend (gold you're still holding onto by Dlvl 5 buys
+noticeably less than it did up top), so don't bank on stockpiling early
+and coasting on it later.
+
 Both wands run on charges — they fire until dry, then sit idle (dimmed
 on the map) recharging slowly on their own. Enchanting one tops it back
 up and raises its max charges. Nothing in this game is a one-way meter:

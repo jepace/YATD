@@ -19,6 +19,16 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Gold value scales down with depth.** `towerCost(type)` multiplies
+  every build/enchant price by `1.18^(dlvl-1)` on top of the base cost
+  in `TOWERS`, so the gold you're still sitting on by Dlvl 5 doesn't go
+  as far as it did on Dlvl 1 — addresses reports of finishing runs with
+  thousands of unspent zorkmids. Difficulty scaling per dungeon level
+  was also bumped a notch (`waveHpScale`'s dlvl exponent 1.15→1.2, the
+  boss's matching exponent, and `genWaves`'s per-dlvl budget multiplier
+  1.3→1.35) after a report of clearing all of Dlvl 5 without leaving the
+  entrance room — see `CLAUDE.md` section 3 for exact formulas before
+  retuning.
 - **Targeted scroll/wand deploy.** The fireball scroll and cold wand no
   longer hit every monster on the level instantly — `r`/`z` arms a
   targeting reticle (`G.targeting`, auto-pausing like a menu), a click or

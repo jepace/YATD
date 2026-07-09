@@ -69,14 +69,23 @@ The `<script>` is organized top-to-bottom in sections (marked with
    troll sets it, at 3) overrides the baseline for a monster that should
    heal distinctly faster. `WAVES` is regenerated on
    every new level by `genWaves(dlvl)`: each wave spends a point budget
-   (~8×1.5^(w−1) × 1.3^(dlvl−1), ±15%) on 1–3 monster types from a pool
+   (~8×1.5^(w−1) × 1.35^(dlvl−1), ±15%) on 1–3 monster types from a pool
    gated by minimum wave (`min`); wave 10 always appends the dragon.
    `waveHpScale(w, dlvl)` scales monster HP per wave and per depth — but
    the *per-wave* factor never applies to the boss (`m.boss` → only the
-   *per-dlvl* factor, `Math.pow(1.15, dlvl-1)`, computed inline in
+   *per-dlvl* factor, `Math.pow(1.2, dlvl-1)`, computed inline in
    `spawnCreep`), or random short paths make wave 10 unwinnable.
-   **Balance lives in these tables and `genWaves`'s budget curve** — tune
-   there, not in the logic.
+   `towerCost(type)` scales every build/enchant price the same way
+   (`Math.pow(1.18, G.dlvl-1)` on top of `TOWERS[type].cost`, so
+   `upgradeCost(t)` — which multiplies by `t.lvl+1` — inherits it too):
+   the zorkmids you're still holding onto by Dlvl 5 buy less than they
+   did on Dlvl 1, which is also *why* a stockpile that felt like plenty
+   early on stops feeling that way — it's deliberate, not a bug. `t.spent`
+   always records the price actually paid, so `sellTower`'s 70% refund
+   naturally reflects whatever dlvl the tower was bought at, no separate
+   bookkeeping needed. **Balance lives in these tables, `genWaves`'s
+   budget curve, and `towerCost`'s dlvl exponent** — tune there, not in
+   the logic.
    Both wand towers (`TOWERS[1]` Wand of Striking, `TOWERS[5]` Wand of
    Lightning) have limited `maxCharges`, scaling with level via
    `towerMaxCharges(t)` (×1.5 per level, up to `MAX_LVL` = 4) and
