@@ -45,7 +45,21 @@ level-generic), and **multiple dungeon levels**: clearing wave 10 below
 `MAX_DLVL` (5) calls `descend()` — a brand new `genLevel()`/`genWaves()`,
 gold/score/HP carry over, towers don't, difficulty scales up ~1.3x
 budget and ~1.15x HP per level (bosses too). See `CLAUDE.md` section 4
-("Dungeon levels") before touching level-transition logic.
+("Dungeon levels") before touching level-transition logic. Also shipped:
+**two more towers**, `\` Wand of Lightning (`kind: "chain"`, arcs to 2
+more targets, `chainRange`/`chainFalloff` — this used to be idea 7's
+"Lightning rod" suggestion below, now removed from the open list) and
+`%` Dirt Wall (`kind: "wall"`, pure obstacle with `hp` instead of
+`dmg`/`range`, worn down by `updateWalls()` whenever a live creep is
+orthogonally adjacent — see `CLAUDE.md` section 3); **a real bug fix**
+in `creepCell()`'s lane-jitter offset, which used to check only terrain
+and could visually place a grounded creep on top of an adjacent tower
+(never affected leak detection, which reads `c.x,c.y` directly, but did
+affect what got rendered/targeted/collided) — now also checks
+`!towerAt(vx,vy)`; and a **render fix** for flying creeps, which
+legitimately CAN share a cell with a tower (that's the point of flying)
+— the creep-render loop now tints the background so it reads as "flying
+over" instead of looking like the same bug.
 
 **Process note:** the user has asked that changes here be verified by
 code review, not by launching a headless browser to click through the
@@ -87,12 +101,13 @@ only) vs. when full browser verification is still warranted.
    feel a malignant aura..."): monsters hasted, towers -25% range, double
    bounty, fog (map dimmed outside tower ranges). One modifier every few
    waves keeps builds honest.
-7. **Tower variety.** `\` Lightning rod (chain to 3 targets, needs LOS
-   like the other ranged towers), `)` Hired adventurer (blocks the
-   corridor, melees, has HP, monsters attack it — no LOS needed, it's
-   melee), `"` Amulet shrine (aura buff to adjacent towers). Keep total
-   ≤ 7 with hotkeys 1–7; pick glyphs from unused NetHack object-class
-   punctuation, never a letter (see the process note above).
+7. **More tower variety.** `)` Hired adventurer (blocks the corridor,
+   melees, has HP like the dirt wall but actually fights back, monsters
+   attack it — no LOS needed, it's melee), `"` Amulet shrine (aura buff
+   to adjacent towers, no attack of its own). We're at 6 of a soft cap of
+   7 (hotkeys 1–9 would still fit on the status line if that cap needs to
+   move); pick a glyph from unused NetHack object-class punctuation,
+   never a letter (see the process note above).
 8. **Endless mode past Dlvl 5.** After the `MAX_DLVL` victory, offer
    "descend anyway": keep calling `descend()` past the current cap
    (`won` no longer ends things, or offer it as a post-victory choice)

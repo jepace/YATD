@@ -45,9 +45,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
      trap under — traps don't block). Both can now target tiles monsters
      actually walk over — see section 4.
 
-3. **Data tables** — `TOWERS` (1–4, keyed by hotkey; glyphs are always
-   NetHack object-class punctuation — `/` `0` `{` `^` — never a letter,
-   since letters are reserved for monsters), `MONSTERS` (keyed by
+3. **Data tables** — `TOWERS` (1–6, keyed by hotkey; glyphs are always
+   NetHack object-class punctuation — `/` `0` `{` `^` `\` `%` — never a
+   letter, since letters are reserved for monsters), `MONSTERS` (keyed by
    their map glyph: `r x a b k ; o & Z T D`). Monster flags that interact
    with the pathfinding/combat systems: `flies: true` (bat) makes a
    creep use `G.flowFly` instead of `G.flow` — see the pathfinding note
@@ -81,6 +81,21 @@ The `<script>` is organized top-to-bottom in sections (marked with
    dimmed (`empty` check in the tower draw loop) and simply stops firing
    — `updateTowers` `continue`s past it without resetting `t.cd`, so it
    fires again the instant a charge trickles back in.
+   `TOWERS[5]` (Wand of Lightning, `kind: "chain"`) is a bolt that arcs:
+   after damaging its primary target it looks for the nearest un-hit,
+   non-submerged, LOS-visible creep within `chainRange` of the *previous*
+   hit (not the tower), deals `chainFalloff`-reduced damage, and repeats
+   up to `chainCount` extra times — each hop draws its own `beamFx`
+   segment. `TOWERS[6]` (Dirt Wall, `kind: "wall"`) is pure obstacle: it
+   has `hp`/`towerMaxHp(t)` instead of `dmg`/`range`, `updateTowers`
+   `continue`s past it immediately (no combat branch applies), and a
+   separate `updateWalls(dt)` (called right after `updateCreeps` in
+   `update()`) chips `WALL_DPS` off any wall with a live, non-dead creep
+   orthogonally adjacent — reaching 0 hp removes the tower with no
+   refund and triggers one `G.flow = computeFlow()`. Both new tower
+   kinds needed zero changes to `buildable`/`wouldSealPath`/`computeFlow`
+   — they participate in the maze system automatically via `blocks: true`,
+   which is the whole point of that flag being generic.
    Items: monsters have an 8% drop chance (`dropItem`): gold pile,
    `?` scroll of fireball (`r`, 45 dmg to all), `!` potion of haste
    (`q`, towers 2× rate 8s via `G.hasteUntil`), `/` wand of cold
@@ -109,8 +124,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
    because `resetGame()` also resets things (gold, HP, score, inventory)
    that `descend()` must NOT touch.
 
-   **Pathfinding (maze-building TD, not a fixed-path TD):** towers 1–3
-   (`TOWERS[n].blocks === true`) physically occupy their tile; monsters
+   **Pathfinding (maze-building TD, not a fixed-path TD):** most towers
+   (`TOWERS[n].blocks === true` — everything except the fire trap)
+   physically occupy their tile; monsters
    have no fixed route and instead follow a BFS flow field recomputed
    from scratch by `computeFlow()` every time a blocking tower is built
    or sold (`G.flow = computeFlow()`, stored on `G`, `{dist, next}`
@@ -135,7 +151,11 @@ The `<script>` is organized top-to-bottom in sections (marked with
    on `MONSTERS[c.type].flies`; both `advanceTarget()` and
    `creepProgress()` go through it so a flying creep is fully consistent
    end to end (movement, targeting priority) without touching any other
-   code path.
+   code path. Since a flyer's `c.x,c.y` genuinely CAN equal a tower's
+   cell (that's the point — it flew over it), the creep-render loop in
+   `drawGame()` tints the background (`#241a30`) whenever
+   `m.flies && towerAt(x,y)` so it reads as "flying over" rather than
+   looking like a rendering glitch.
 
    Creeps move cell-to-cell: `c.x,c.y` = current cell, `c.nx,c.ny` = the
    cell they're already committed to stepping into (from
@@ -150,9 +170,15 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `creepCell(c)` is the single source of truth for a creep's actual
    cell — it applies `jit` as a perpendicular offset from the creep's
    current travel direction (`c.nx-c.x, c.ny-c.y`) ONLY when the base
-   cell is room floor `.` (never in 1-wide corridors, so trap alignment
-   and targeting stay exact); it's used for everything: rendering, tower
-   targeting, trap collision, and leak/hover checks. `creepProgress(c)`
+   cell is room floor `.` AND the offset cell isn't occupied by a tower
+   (`!towerAt(vx,vy)` — a real bug fixed here: the jitter used to check
+   only terrain, so a ground creep whose true position was a legitimate
+   tower-free cell could visually render, and be targeted/collide, on an
+   adjacent tower's cell purely as a rendering-offset artifact; it never
+   affected leak detection since that reads `c.x,c.y` directly, not
+   `creepCell()`) — never in 1-wide corridors, so trap alignment and
+   targeting stay exact regardless; it's used for everything: rendering,
+   tower targeting, trap collision, and leak/hover checks. `creepProgress(c)`
    (flow distance minus `c.t`) replaces the old "furthest along the
    path" sort key for tower targeting — lower is closer to the exit.
 

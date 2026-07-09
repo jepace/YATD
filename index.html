@@ -343,9 +343,18 @@ const TOWERS = {
   4: { ch: "^", name: "Fire Trap", cost: 15, dmg: 14, range: 0, cd: 0.5,
        kind: "trap", blocks: false, fg: "#e85050",
        desc: "burns monsters standing on it (place ON the corridor)" },
+  5: { ch: "\\", name: "Wand of Lightning", cost: 30, dmg: 6, range: 4.5, cd: 0.9,
+       kind: "chain", blocks: true, chainCount: 2, chainRange: 3.5, chainFalloff: 0.6,
+       fg: "#c8f0ff",
+       desc: "arcs to 2 more targets after the first, needs LOS per link" },
+  6: { ch: "%", name: "Dirt Wall", cost: 8, range: 0, cd: 0,
+       kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
+       desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
 const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
 const upgradeCost = (t) => TOWERS[t.type].cost * (t.lvl + 1);
+const towerMaxHp = (t) => Math.round(TOWERS[t.type].hp * Math.pow(1.5, t.lvl - 1));
+const WALL_DPS = 6;   // how fast an adjacent creep chips a dirt wall down
 
 // `flies: true` ignores every blocking tower (only rock/walls stop it --
 // see G.flowFly/creepFlow) -- the counter to a turtled tower maze.
@@ -538,7 +547,10 @@ function creepCell(c) {
   if (!c.jit || map[y][x] !== ".") return [x, y];
   const px = -Math.sign(c.ny - y), py = Math.sign(c.nx - x);
   const vx = x + px * c.jit, vy = y + py * c.jit;
-  if (map[vy] && map[vy][vx] === ".") return [vx, vy];
+  // jitter must never land on an occupied tower cell -- a creep's TRUE
+  // position (c.x,c.y) is always tower-free, but the offset used purely
+  // for visual/lane variety was only checking terrain, not occupancy
+  if (map[vy] && map[vy][vx] === "." && !towerAt(vx, vy)) return [vx, vy];
   return [x, y];
 }
 // how far a creep is from the exit (flow-field distance minus its
@@ -567,6 +579,7 @@ function buildTower(type, x, y) {
   G.gold -= spec.cost;
   const t = { type, x, y, lvl: 1, cd: 0, spent: spec.cost };
   if (spec.maxCharges) t.charges = spec.maxCharges;
+  if (spec.hp) t.hp = spec.hp;
   G.towers.push(t);
   if (spec.blocks) G.flow = computeFlow();
   message("You conjure a " + spec.name + ".");
@@ -579,6 +592,7 @@ function upgradeTower(t) {
   if (G.gold < cost) { message("Enchanting costs " + cost + " zorkmids; you are short."); return; }
   G.gold -= cost; t.spent += cost; t.lvl++;
   if (TOWERS[t.type].maxCharges) t.charges = towerMaxCharges(t);  // enchanting refills it
+  if (TOWERS[t.type].hp) t.hp = towerMaxHp(t);                    // and reinforces a wall
   message("Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")");
 }
 function sellTower(t) {
@@ -688,6 +702,7 @@ function updateTowers(dt) {
   const hasteMul = G.time < G.hasteUntil ? 0.5 : 1;   // potion of haste
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
+    if (spec.kind === "wall") continue; // pure obstacle, no combat behavior
     if (spec.maxCharges) {
       const max = towerMaxCharges(t);
       if (t.charges < max) t.charges = Math.min(max, t.charges + CHARGE_REGEN * dt);
@@ -736,6 +751,30 @@ function updateTowers(dt) {
       }
       splashFx(cx, cy, spec.fg);
       t.cd = spec.cd * hasteMul;
+    } else if (spec.kind === "chain") {
+      let dmgThis = dmg, current = targets[0];
+      let [fromX, fromY] = [t.x, t.y];
+      const hit = new Set();
+      for (let i = 0; current && i <= spec.chainCount; i++) {
+        damageCreep(current, dmgThis);
+        hit.add(current);
+        const [cx, cy] = creepCell(current);
+        beamFx(fromX, fromY, cx, cy, spec.fg);
+        fromX = cx; fromY = cy;
+        dmgThis = Math.round(dmgThis * spec.chainFalloff);
+        // arc to the nearest un-hit, visible, non-submerged creep in range
+        let next = null, bestD = Infinity;
+        for (const c of G.creeps) {
+          if (c.dead || hit.has(c) || isSubmerged(c)) continue;
+          const [x, y] = creepCell(c);
+          const d = Math.hypot(x - fromX, y - fromY);
+          if (d <= spec.chainRange && d < bestD && hasLineOfSight(fromX, fromY, x, y)) {
+            bestD = d; next = c;
+          }
+        }
+        current = next;
+      }
+      t.cd = spec.cd * hasteMul;
     } else { // bolt
       if (spec.maxCharges && Math.floor(t.charges) < 1) continue; // out of charges
       if (spec.maxCharges) t.charges--;
@@ -776,6 +815,27 @@ function updateCreeps(dt) {
   G.creeps = G.creeps.filter(c => !c.dead);
 }
 
+// dirt walls are pure obstacles with no offense of their own -- any live
+// creep standing orthogonally adjacent chips away at WALL_DPS, and a
+// wall that reaches 0 hp crumbles (no refund, unlike selling)
+function updateWalls(dt) {
+  let anyBroken = false;
+  for (const t of G.towers) {
+    if (!TOWERS[t.type].hp) continue;
+    const adjacent = G.creeps.some(c =>
+      !c.dead && Math.abs(c.x - t.x) + Math.abs(c.y - t.y) === 1);
+    if (!adjacent) continue;
+    t.hp -= WALL_DPS * dt;
+    if (t.hp <= 0) { t.broken = true; anyBroken = true; }
+  }
+  if (anyBroken) {
+    const broken = G.towers.filter(t => t.broken);
+    G.towers = G.towers.filter(t => !t.broken);
+    G.flow = computeFlow();
+    for (const t of broken) message("The " + TOWERS[t.type].name + " crumbles under the assault!");
+  }
+}
+
 function update(dt) {
   if (G.paused) return;
   G.time += dt;
@@ -792,6 +852,7 @@ function update(dt) {
   }
   updateTowers(dt);
   updateCreeps(dt);
+  updateWalls(dt);
 
   if (G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
     // wave cleared
@@ -846,15 +907,19 @@ function drawGame() {
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
     const empty = spec.maxCharges && Math.floor(t.charges) < 1;
+    const cracked = spec.hp && t.hp < towerMaxHp(t) * 0.4;
     const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000"][t.lvl] || spec.fg;
-    const fg = empty ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
+    const fg = (empty || cracked) ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
     put(t.x, MAPY + t.y, spec.ch, fg, t === G.selTower ? "#243024" : undefined);
   }
   for (const c of G.creeps) {
     const [x, y] = creepCell(c);
     const m = MONSTERS[c.type];
     const fg = c.hitFlash > 0 ? "#ffffff" : (isSubmerged(c) ? "#2a4a5a" : m.fg);
-    put(x, MAPY + y, c.type, fg);
+    // flying creeps ignore blocking towers and can share a tower's cell --
+    // tint the background so it reads as "flying over", not "on top of"
+    const bg = m.flies && towerAt(x, y) ? "#241a30" : undefined;
+    put(x, MAPY + y, c.type, fg, bg);
   }
   for (const f of G.fx)
     for (const [x, y] of f.cells)
@@ -889,15 +954,17 @@ function drawGame() {
   let l2;
   if (G.selTower) {
     const t = G.selTower, spec = TOWERS[t.type];
-    l2 = spec.ch + " " + spec.name + " L" + t.lvl + "  dmg:" + towerDmg(t) +
-      "  rng:" + towerRange(t).toFixed(1) +
-      (spec.maxCharges ? "  chg:" + Math.floor(t.charges) + "/" + towerMaxCharges(t) : "") +
+    l2 = spec.ch + " " + spec.name + " L" + t.lvl +
+      (spec.hp
+        ? "  hp:" + Math.ceil(t.hp) + "/" + towerMaxHp(t)
+        : "  dmg:" + towerDmg(t) + "  rng:" + towerRange(t).toFixed(1) +
+          (spec.maxCharges ? "  chg:" + Math.floor(t.charges) + "/" + towerMaxCharges(t) : "")) +
       (t.lvl < MAX_LVL ? "  [u]pgrade $" + upgradeCost(t) : "  (max)") +
       "  [s]ell $" + Math.floor(t.spent * 0.7) + "  ESC";
   } else {
     l2 = G.selType
       ? "Readied: " + TOWERS[G.selType].ch + " " + TOWERS[G.selType].name + "  place it!"
-      : "1:/$10 2:0$25 3:{$20 4:^$15 (ready a tower)";
+      : "1:/$10 2:0$25 3:{$20 4:^$15 5:\\$30 6:%$8 (ready)";
     l2 += "  " + spaceHint + " i:inv ?:help";
     // hovered monster info
     if (hy >= 0 && hy < MAPH) {
@@ -928,16 +995,16 @@ function drawHelp() {
   overlayBox(x0, y0, w, h);
   const lines = [
     "--------------------- YATD Help ---------------------",
-    "Monsters route live around towers -- no fixed path. Each",
-    "leak costs HP. Clear wave 10 to descend (up to Dlvl " + MAX_DLVL + ").",
-    "",
-    "TOWERS -- 1-4 to ready, click/ENTER to build (press the",
-    "number again each time). 1-3 block & need LOS. Enchant (u)",
-    "up to L" + MAX_LVL + " for more dmg/range/(wand) charges.",
+    "Monsters route live around towers -- no fixed path. Leaks",
+    "cost HP. Clear wave 10 to descend (up to Dlvl " + MAX_DLVL + ").",
+    "TOWERS -- 1-6 to ready, click/ENTER to build (number again",
+    "each time). Most block & need LOS. Enchant (u) up to L" + MAX_LVL + ".",
     " 1 / Wand of Striking  $10  bolts, limited charges, recharges",
     " 2 0 Acid Blob         $25  splash, blocks, needs LOS",
     " 3 { Frost Fountain    $20  slows, blocks, needs LOS",
     " 4 ^ Fire Trap         $15  ON the corridor #, no block",
+    " 5 \\ Wand of Lightning $30  arcs to 2 more, blocks, LOS",
+    " 6 % Dirt Wall         $8   pure block, hp, no combat",
     "",
     "ITEMS: r read ?scroll  q quaff !potion  z zap /wand  i inv",
     "KEYS: SPACE wave/pause  u upgrade  s sell  a auto  Ctrl-P log",
@@ -1095,7 +1162,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (G.overlay) { if (e.key === "Escape") G.overlay = null; return; }
 
-  if (e.key >= "1" && e.key <= "4") {
+  if (e.key >= "1" && e.key <= "6") {
     G.selType = +e.key; G.selTower = null;
     message("Ready: " + TOWERS[G.selType].name + " ($" + TOWERS[G.selType].cost + ") — " + TOWERS[G.selType].desc);
     return;
