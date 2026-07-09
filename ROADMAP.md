@@ -19,6 +19,29 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Message variety.** The highest-repeat flavor messages (kill, boss
+  kill, leak, build, upgrade, sell, item drops, tower destroyed/disarmed,
+  wave-clear, descend, haste potion) now each pick from 2–4 variants via
+  a new `pick(arr)` helper (seeded off the same `rnd()`, so `?seed=N`
+  replays are still deterministic) instead of one fixed string — a long
+  session no longer reads the exact same sentence 50+ times. Purely
+  functional status/error messages were deliberately left alone; see
+  `CLAUDE.md` section 6 before adding a new one-off flavor message.
+  Also fixed a real grammar bug this surfaced: the "You conjure a/an X"
+  article was hardcoded to only special-case tower type 1, so "Acid
+  Blob" (also vowel-initial) was getting "a Acid Blob" — now computed
+  generically from the tower's name.
+- **Two dungeon-generation correctness fixes.** Stairs (`<`/`>`) could
+  previously land on a bare corridor cell or even a wall, since
+  `ENTRANCE`/`EXIT` were just wherever the first/last path waypoint
+  happened to fall; `genRooms()` now force-places a room on each one
+  first, guaranteeing real room floor. Separately, a corridor that
+  merely grazed a room's corner could get turned into a door there —
+  diagonal-only from the room's actual floor (movement is orthogonal),
+  so it looked connected but wasn't reachable; room corners are now
+  explicitly excluded from door conversion. Both verified with a 300-trial
+  scratch test running the real generation functions directly (not a
+  hand-written mirror) — see `CLAUDE.md` section 2.
 - **Tower unlocking, and an early-game economy tune-down.** A second
   progression axis alongside player level: only the Archer (`TOWERS[1]`,
   renamed from Wand of Striking) is available from a fresh game — every

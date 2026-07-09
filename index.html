@@ -143,6 +143,10 @@ function newSeed() {
 }
 let SEED = 0, rnd = Math.random;
 const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+// picks a random element from a list of message variants, using the same
+// seeded rnd() as everything else so a replayed ?seed=N game reads the
+// same messages in the same order, not just the same map/waves
+const pick = (arr) => arr[ri(0, arr.length - 1)];
 
 const map = [];            // MAPH x MAPW of glyphs; ' ' = solid rock
 for (let y = 0; y < MAPH; y++) map.push(new Array(MAPW).fill(" "));
@@ -179,18 +183,30 @@ function pathCells(wp) {
   }
   return cells;
 }
-// rooms seeded on random path cells; rejected if too close to another room
-function genRooms(cells) {
+// rooms seeded on random path cells; rejected if too close to another room.
+// `forceCells` (the entrance/exit waypoints) always get a room placed on
+// them FIRST, unconditionally -- stairs must never end up sitting in a
+// bare corridor or on a wall tile, so buildLevel() can't finish without
+// each one landing on guaranteed room floor. The same x1/y1 formula used
+// for random rooms below always contains its own center cell (provably:
+// the clamps only ever move x1 toward cx, never past it, given cx is
+// always within the map's interior), so reusing it here is enough --
+// no separate containment check needed.
+function genRooms(cells, forceCells) {
   const rooms = [];
   const clash = (r) => rooms.some(o =>
     r[0] - 2 <= o[2] && o[0] - 2 <= r[2] && r[1] - 2 <= o[3] && o[1] - 2 <= r[3]);
-  let tries = 0;
-  while (rooms.length < 8 && tries++ < 250) {
-    const [cx, cy] = cells[ri(0, cells.length - 1)];
+  const roomAt = (cx, cy) => {
     const w = ri(5, 9), h = ri(3, 5);
     const x1 = Math.max(1, Math.min(77 - w, cx - ri(0, w)));
     const y1 = Math.max(1, Math.min(19 - h, cy - ri(0, h)));
-    const r = [x1, y1, x1 + w, y1 + h];
+    return [x1, y1, x1 + w, y1 + h];
+  };
+  for (const [cx, cy] of forceCells || []) rooms.push(roomAt(cx, cy));
+  let tries = 0;
+  while (rooms.length < 8 && tries++ < 250) {
+    const [cx, cy] = cells[ri(0, cells.length - 1)];
+    const r = roomAt(cx, cy);
     if (!clash(r)) rooms.push(r);
   }
   return rooms;
@@ -202,7 +218,22 @@ function buildLevel() {
   path.length = 0; pathIdx.clear();
   const wp = genPath();
   const cells = pathCells(wp);
-  for (const [x1, y1, x2, y2] of genRooms(cells)) {
+  const rooms = genRooms(cells, [wp[0], wp[wp.length - 1]]);
+  // a room's own 4 corner cells are never valid door sites -- a corridor
+  // that happens to graze exactly one is diagonal-only from the room's
+  // interior floor (movement is orthogonal, see computeFlow), so a door
+  // there would be a visible dead end that looks connected but isn't.
+  // (The path segment that actually SEEDED a given room is guaranteed to
+  // cross its walls well clear of the corners -- see genRooms -- so
+  // skipping corner conversion here only ever discards a spurious touch
+  // from some unrelated corridor passing near the room, never a room's
+  // real connection to the corridor network.)
+  const corners = new Set();
+  for (const [x1, y1, x2, y2] of rooms) {
+    corners.add((x1 - 1) + "," + (y1 - 1)); corners.add((x2 + 1) + "," + (y1 - 1));
+    corners.add((x1 - 1) + "," + (y2 + 1)); corners.add((x2 + 1) + "," + (y2 + 1));
+  }
+  for (const [x1, y1, x2, y2] of rooms) {
     for (let y = y1 - 1; y <= y2 + 1; y++) for (let x = x1 - 1; x <= x2 + 1; x++) {
       if (y < 0 || x < 0 || y >= MAPH || x >= MAPW) continue;
       if (y === y1 - 1 || y === y2 + 1) map[y][x] = "-";
@@ -215,7 +246,7 @@ function buildLevel() {
     if (!pathIdx.has(k)) { pathIdx.set(k, path.length); path.push([x, y]); }
     const g = map[y][x];
     if (g === " ") map[y][x] = "#";
-    else if (g === "|" || g === "-") map[y][x] = "+";
+    else if ((g === "|" || g === "-") && !corners.has(k)) map[y][x] = "+";
   }
   ENTRANCE = [wp[0][0], wp[0][1]];
   EXIT = wp[wp.length - 1];
@@ -711,8 +742,11 @@ function descend() {
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
   G.state = "build";
-  message("You descend to Dlvl " + G.dlvl +
-    "...  the air grows colder and the dark feels less empty.");
+  message(pick([
+    "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
+    "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
+    "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
+  ]));
 }
 
 function startWave() {
@@ -812,7 +846,12 @@ function buildTower(type, x, y) {
   if (spec.trapHp) t.trapHp = spec.trapHp;
   G.towers.push(t);
   if (spec.blocks) G.flow = computeFlow();
-  message("You conjure " + (type === 1 ? "an" : "a") + " " + spec.name + ".");
+  const article = /^[aeiou]/i.test(spec.name) ? "an" : "a";
+  message(pick([
+    "You conjure " + article + " " + spec.name + ".",
+    article[0].toUpperCase() + article.slice(1) + " " + spec.name + " rises from the stone.",
+    "You set " + article + " " + spec.name + " in place.",
+  ]));
   return true;
 }
 // permanently unlocks a tower TYPE (not a specific tower) for the rest of
@@ -843,7 +882,11 @@ function upgradeTower(t) {
   if (TOWERS[t.type].hp) t.hp = towerMaxHp(t);                    // and reinforces a wall
   if (TOWERS[t.type].siegeHp) t.siegeHp = towerMaxSiegeHp(t);     // and its siege durability
   if (TOWERS[t.type].trapHp) t.trapHp = towerMaxTrapHp(t);        // and a trap's resistance to disarming
-  message("Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")");
+  message(pick([
+    "Your " + TOWERS[t.type].name + " glows brightly! (level " + t.lvl + ")",
+    "Your " + TOWERS[t.type].name + " hums with new power! (level " + t.lvl + ")",
+    "You feel the " + TOWERS[t.type].name + " grow stronger. (level " + t.lvl + ")",
+  ]));
 }
 function sellTower(t) {
   if (!t) return;
@@ -854,7 +897,11 @@ function sellTower(t) {
   // recomputed live each frame, so it naturally rolls over to showing
   // build options for the now-empty tile
   if (TOWERS[t.type].blocks) G.flow = computeFlow();
-  message("You dismantle the " + TOWERS[t.type].name + " for " + refund + " zorkmids.");
+  message(pick([
+    "You dismantle the " + TOWERS[t.type].name + " for " + refund + " zorkmids.",
+    "You break down the " + TOWERS[t.type].name + " and pocket " + refund + " zorkmids.",
+    "The " + TOWERS[t.type].name + " comes apart, worth " + refund + " zorkmids to you.",
+  ]));
 }
 const towerDmg = (t) => Math.round(TOWERS[t.type].dmg * Math.pow(UPG_MULT, t.lvl - 1));
 const towerRange = (t) => TOWERS[t.type].range + UPG_RANGE * (t.lvl - 1);
@@ -939,10 +986,19 @@ function damageCreep(c, dmg, dtype) {
     const bounty = Math.round(m.bounty * BOUNTY_MULT);
     G.gold += bounty; G.kills++; G.score += bounty * 10;
     if (m.boss) {
-      message("The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--");
+      message(pick([
+        "The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--",
+        "The " + m.name + " collapses in a heap!  Victory is yours!  --More--",
+        "You have slain the " + m.name + "!  The dungeon itself seems to exhale.  --More--",
+      ]));
       G.paused = true;
     }
-    else message("The " + m.name + " is destroyed. (+" + bounty + " zorkmids)");
+    else message(pick([
+      "The " + m.name + " is destroyed. (+" + bounty + " zorkmids)",
+      "You have slain the " + m.name + ". (+" + bounty + " zorkmids)",
+      "The " + m.name + " falls. (+" + bounty + " zorkmids)",
+      "The " + m.name + " is reduced to a smoking ruin. (+" + bounty + " zorkmids)",
+    ]));
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
     gainXp(bounty); // called last so a level-up's --More-- message wins over the kill message
@@ -960,7 +1016,11 @@ function spawnChild(parent, m) {
   };
   advanceTarget(child);
   G.creeps.push(child);
-  message("A lesser " + m.name + " claws free!");
+  message(pick([
+    "A lesser " + m.name + " claws free!",
+    "Something smaller stirs in the remains -- a lesser " + m.name + "!",
+    "A lesser " + m.name + " tears itself loose from the corpse!",
+  ]));
 }
 
 /* ---------- items (random drops from kills) ---------- */
@@ -969,19 +1029,39 @@ function dropItem() {
   if (roll < 0.35) {
     const g = 5 + G.wave * 2;
     G.gold += g;
-    message("You find a small pile of zorkmids! (+" + g + ")");
+    message(pick([
+      "You find a small pile of zorkmids! (+" + g + ")",
+      "A handful of zorkmids spills from the corpse! (+" + g + ")",
+      "You scavenge some zorkmids! (+" + g + ")",
+    ]));
   } else if (roll < 0.55) {
     G.inv.scroll++;
-    message("You find a scroll labeled ELBIB YLOH!  [r]ead it for fiery doom.");
+    message(pick([
+      "You find a scroll labeled ELBIB YLOH!  [r]ead it for fiery doom.",
+      "A scorched scroll survives the fight!  [r]ead it for fiery doom.",
+      "You find a scroll labeled ELBIB YLOH, still warm to the touch.  [r]ead it for fiery doom.",
+    ]));
   } else if (roll < 0.75) {
     G.inv.potion++;
-    message("You find a fizzy potion!  [q]uaff to hasten your towers.");
+    message(pick([
+      "You find a fizzy potion!  [q]uaff to hasten your towers.",
+      "A potion rolls free, still fizzing!  [q]uaff to hasten your towers.",
+      "You find a potion of speed!  [q]uaff to hasten your towers.",
+    ]));
   } else if (roll < 0.9) {
     G.inv.wand++;
-    message("You find a wand of cold!  [z]ap it to chill every monster.");
+    message(pick([
+      "You find a wand of cold!  [z]ap it to chill every monster.",
+      "A frost-rimed wand of cold clatters to the floor!  [z]ap it to chill every monster.",
+      "You pry a wand of cold loose!  [z]ap it to chill every monster.",
+    ]));
   } else {
     G.inv.charge++;
-    message("You find a wand of charging!  [c]harge to restore your towers.");
+    message(pick([
+      "You find a wand of charging!  [c]harge to restore your towers.",
+      "A humming wand of charging survives the fight!  [c]harge to restore your towers.",
+      "You find a wand of charging, still crackling with energy!  [c]harge to restore your towers.",
+    ]));
   }
 }
 // scroll of fireball and wand of cold are targeted: pressing the hotkey
@@ -1035,7 +1115,11 @@ function usePotion() {
   if (G.inv.potion < 1) { message("You have no potions to quaff."); return; }
   G.inv.potion--;
   G.hasteUntil = G.time + 8;
-  message("Gulp.  Your towers hum with supernatural speed! (8s)");
+  message(pick([
+    "Gulp.  Your towers hum with supernatural speed! (8s)",
+    "Gulp.  Time seems to slow around your towers! (8s)",
+    "Gulp.  Your towers blur into a frenzy! (8s)",
+  ]));
 }
 function useCharge() {
   if (G.inv.charge < 1) { message("You have no wands of charging."); return; }
@@ -1213,7 +1297,11 @@ function updateCreeps(dt) {
         // never actually be seen reaching the stairs
         G.fx.push({ cells: [[ex, ey]], ch: m.ch, fg: "#ff5050", ttl: 0.35 });
         G.hp -= m.leak;
-        message("The " + m.name + " descends the stairs!  You lose " + m.leak + " HP.");
+        message(pick([
+          "The " + m.name + " descends the stairs!  You lose " + m.leak + " HP.",
+          "The " + m.name + " slips past you and flees below!  You lose " + m.leak + " HP.",
+          "The " + m.name + " reaches the stairs and is gone!  You lose " + m.leak + " HP.",
+        ]));
         if (G.hp <= 0) { G.hp = 0; G.state = "lost"; }
         break;
       }
@@ -1241,7 +1329,11 @@ function updateWalls(dt) {
     const broken = G.towers.filter(t => t.broken);
     G.towers = G.towers.filter(t => !t.broken);
     G.flow = computeFlow();
-    for (const t of broken) message("The " + TOWERS[t.type].name + " crumbles under the assault!");
+    for (const t of broken) message(pick([
+      "The " + TOWERS[t.type].name + " crumbles under the assault!",
+      "The " + TOWERS[t.type].name + " is smashed to rubble!",
+      "The " + TOWERS[t.type].name + " gives way and collapses!",
+    ]));
   }
 }
 
@@ -1264,7 +1356,7 @@ function updateSiege(dt) {
         Math.abs(c.x - t.x) + Math.abs(c.y - t.y) === 1);
       if (!attacker) continue;
       t.siegeHp -= SIEGE_DPS * dt;
-      if (t.siegeHp <= 0) { t.gone = true; t.goneMsg = "crumbles under the assault"; anyGone = true; }
+      if (t.siegeHp <= 0) { t.gone = true; t.goneKind = "siege"; anyGone = true; }
     } else if (spec.trapHp) {
       const attacker = G.creeps.some(c => {
         if (c.dead || !MONSTERS[c.type].disarms) return false;
@@ -1273,14 +1365,25 @@ function updateSiege(dt) {
       });
       if (!attacker) continue;
       t.trapHp -= DISARM_DPS * dt;
-      if (t.trapHp <= 0) { t.gone = true; t.goneMsg = "is disarmed"; anyGone = true; }
+      if (t.trapHp <= 0) { t.gone = true; t.goneKind = "disarm"; anyGone = true; }
     }
   }
   if (anyGone) {
     const gone = G.towers.filter(t => t.gone);
     G.towers = G.towers.filter(t => !t.gone);
     if (gone.some(t => TOWERS[t.type].blocks)) G.flow = computeFlow();
-    for (const t of gone) message("The " + TOWERS[t.type].name + " " + t.goneMsg + "!");
+    for (const t of gone) {
+      const name = TOWERS[t.type].name;
+      message(t.goneKind === "siege" ? pick([
+        "The " + name + " crumbles under the assault!",
+        "The " + name + " is smashed to pieces!",
+        "The " + name + " is battered into rubble!",
+      ]) : pick([
+        "The " + name + " is disarmed!",
+        "The " + name + " is carefully picked apart and disabled!",
+        "The " + name + " clicks harmlessly and falls still, disarmed!",
+      ]));
+    }
   }
 }
 
@@ -1317,8 +1420,11 @@ function update(dt) {
       }
     } else {
       G.state = "build";
-      message("The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids." +
-        (G.autoStart ? "" : "  --More--"));
+      message(pick([
+        "The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids.",
+        "The last echoes fade.  Wave bonus: " + bonus + " zorkmids.",
+        "Quiet returns to the dungeon.  Wave bonus: " + bonus + " zorkmids.",
+      ]) + (G.autoStart ? "" : "  --More--"));
       if (G.autoStart) startWave();
     }
   }

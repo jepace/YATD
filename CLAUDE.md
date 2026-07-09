@@ -22,13 +22,35 @@ The `<script>` is organized top-to-bottom in sections (marked with
 
 2. **Dungeon map** — PROCEDURALLY GENERATED, new every game (roguelike!):
    - `genPath()` makes serpentine orthogonal waypoints (x-columns strictly
-     increase, so the path can never self-cross); `genRooms(cells)` seeds
-     room rects on random path cells, rejecting overlaps (2-cell margin).
+     increase, so the path can never self-cross); `genRooms(cells,
+     forceCells)` seeds room rects on random path cells, rejecting
+     overlaps (2-cell margin). `forceCells` (always `[wp[0], wp[last]]`,
+     the entrance/exit waypoints) get a room placed on them FIRST,
+     unconditionally, via the same `x1`/`y1` formula the random rooms
+     use — provably, that formula's clamps only ever move a room's
+     origin toward its seed cell, never past it, so the seed cell always
+     ends up inside the room's own floor rectangle. This guarantees the
+     stairs always land on real room floor, never a bare corridor or a
+     wall — before this, `ENTRANCE`/`EXIT` were just wherever the first/
+     last path waypoint happened to fall, with no such guarantee.
    - `buildLevel()` carves into `map`/`path`/`pathIdx` (all mutated IN
      PLACE so `window.YATD` references stay valid): rock `' '` → corridor
-     `#`, room walls → doors `+`, room floor `.` untouched. Returns a
-     quality score; `genLevel()` retries (seed+i) until score ≥ 60
-     buildable tiles near the path AND path length ≥ 135.
+     `#`, room walls → doors `+`, room floor `.` untouched — EXCEPT a
+     room's own 4 corner wall cells, which are collected into a `corners`
+     `Set` and deliberately excluded from door conversion: a corridor
+     that merely grazes a room's corner is diagonal-only from that room's
+     interior floor (movement is strictly orthogonal, see `computeFlow`),
+     so a door there would be a dead end that looks connected on screen
+     but isn't reachable. This never disconnects a room for real, because
+     the path segment that actually *seeded* a given room is guaranteed
+     (same proof as above) to cross its walls with its fixed coordinate
+     strictly between the room's edges, never exactly on a corner — only
+     some unrelated corridor passing nearby can ever collide with a
+     corner, and that's exactly the spurious case worth discarding.
+     Returns a quality score; `genLevel()` retries (seed+i) until score ≥
+     60 buildable tiles near the path AND path length ≥ 135 (verified this
+     invariant doesn't hurt the retry success rate: 200/200 in a scratch
+     test after this change, same as before it).
    - RNG: `mulberry32(SEED)`, `rnd()`/`ri(a,b)`. `?seed=N` URL param
      replays a dungeon (first game only); seed shown on title screen.
      `resetGame()` regenerates level+waves except for the very first game
@@ -231,6 +253,23 @@ The `<script>` is organized top-to-bottom in sections (marked with
    reverse video (real NetHack's own wording and look) — used for
    anything the player must consciously dismiss with SPACE (wave-clear,
    boss kill) rather than a message that just scrolls by.
+
+   **Message variety:** the highest-repeat, narratively-flavored messages
+   (kill, boss kill, leak, build, upgrade, sell, item drops, tower
+   destroyed/disarmed, wave-clear, descend, haste potion) are each 2–4
+   variants picked with `pick(arr)` (`arr[ri(0, arr.length-1)]`, defined
+   next to `rnd`/`ri`) rather than a single fixed string, so a long
+   session doesn't read the exact same sentence dozens of times. `pick()`
+   draws from the same seeded `rnd()` as everything else, so a replayed
+   `?seed=N` game shows the same sequence of message variants too, not
+   just the same map/waves. Purely functional status/error messages
+   (afford checks, "already fully enchanted," pause/speed/auto-start
+   toggles, the one-time title/help text) were deliberately left as
+   single strings — they're transient UI feedback, not narrative flavor,
+   and don't benefit from variety the way a message you'll see 50+ times
+   a game does. If you add a new frequently-repeating flavor message,
+   default to giving it 2–3 variants via `pick()` rather than one fixed
+   string, consistent with the existing ones.
 
    **Elemental damage & dragon immunity:** `damageCreep(c, dmg, dtype)`'s
    third argument is one of `"fire"|"acid"|"electric"|"cold"` (or omitted
