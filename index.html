@@ -219,15 +219,19 @@ function buildLevel() {
   const wp = genPath();
   const cells = pathCells(wp);
   const rooms = genRooms(cells, [wp[0], wp[wp.length - 1]]);
-  // a room's own 4 corner cells are never valid door sites -- a corridor
-  // that happens to graze exactly one is diagonal-only from the room's
-  // interior floor (movement is orthogonal, see computeFlow), so a door
-  // there would be a visible dead end that looks connected but isn't.
-  // (The path segment that actually SEEDED a given room is guaranteed to
-  // cross its walls well clear of the corners -- see genRooms -- so
-  // skipping corner conversion here only ever discards a spurious touch
-  // from some unrelated corridor passing near the room, never a room's
-  // real connection to the corridor network.)
+  // a room's own 4 corner cells are only skipped as door sites when a
+  // corridor merely GRAZES one in isolation (diagonal-only from the
+  // room's interior floor, since movement is orthogonal -- a door there
+  // would be a visible dead end that looks connected but isn't). But a
+  // corridor's own straight run can also legitimately pass STRAIGHT
+  // THROUGH a corner coordinate as part of its main route (e.g. a
+  // vertical segment running flush along a room's side wall crosses
+  // that wall's corner exactly where the room ends) -- severing that
+  // would break the corridor's contiguity, not just skip a cosmetic
+  // dead end. So a corner is excluded only if NEITHER orthogonal
+  // neighbor is itself on the path: if either is, this corner is
+  // load-bearing for the corridor and must stay a door.
+  const cellSet = new Set(cells.map(([x, y]) => x + "," + y));
   const corners = new Set();
   for (const [x1, y1, x2, y2] of rooms) {
     corners.add((x1 - 1) + "," + (y1 - 1)); corners.add((x2 + 1) + "," + (y1 - 1));
@@ -241,12 +245,16 @@ function buildLevel() {
       else map[y][x] = ".";
     }
   }
+  const isolatedCorner = (x, y) =>
+    corners.has(x + "," + y) &&
+    !cellSet.has((x + 1) + "," + y) && !cellSet.has((x - 1) + "," + y) &&
+    !cellSet.has(x + "," + (y + 1)) && !cellSet.has(x + "," + (y - 1));
   for (const [x, y] of cells) {
     const k = x + "," + y;
     if (!pathIdx.has(k)) { pathIdx.set(k, path.length); path.push([x, y]); }
     const g = map[y][x];
     if (g === " ") map[y][x] = "#";
-    else if ((g === "|" || g === "-") && !corners.has(k)) map[y][x] = "+";
+    else if ((g === "|" || g === "-") && !isolatedCorner(x, y)) map[y][x] = "+";
   }
   ENTRANCE = [wp[0][0], wp[0][1]];
   EXIT = wp[wp.length - 1];

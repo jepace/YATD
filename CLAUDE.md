@@ -37,16 +37,33 @@ The `<script>` is organized top-to-bottom in sections (marked with
      PLACE so `window.YATD` references stay valid): rock `' '` → corridor
      `#`, room walls → doors `+`, room floor `.` untouched — EXCEPT a
      room's own 4 corner wall cells, which are collected into a `corners`
-     `Set` and deliberately excluded from door conversion: a corridor
-     that merely grazes a room's corner is diagonal-only from that room's
-     interior floor (movement is strictly orthogonal, see `computeFlow`),
-     so a door there would be a dead end that looks connected on screen
-     but isn't reachable. This never disconnects a room for real, because
-     the path segment that actually *seeded* a given room is guaranteed
-     (same proof as above) to cross its walls with its fixed coordinate
-     strictly between the room's edges, never exactly on a corner — only
-     some unrelated corridor passing nearby can ever collide with a
-     corner, and that's exactly the spurious case worth discarding.
+     `Set` and excluded from door conversion **only when isolated**: a
+     corridor that merely grazes a corner in isolation is diagonal-only
+     from that room's interior floor (movement is strictly orthogonal,
+     see `computeFlow`), so a door there would be a dead end that looks
+     connected on screen but isn't reachable. `isolatedCorner(x, y)`
+     checks this by requiring NONE of the cell's 4 orthogonal neighbors
+     to also be on the path (`cellSet`, the full path cell list, built
+     upfront so this check doesn't depend on carving order) — **a corner
+     with a path neighbor on either side is load-bearing for the
+     corridor's own contiguity and must still become a door**, full stop,
+     even though it's a corner. This distinction is the fix for a real
+     shipped regression: an earlier version excluded *every* corner
+     unconditionally, on the theory that "the path segment that seeded a
+     room never hits its own corners" — true, but it ignored that a
+     *different*, unrelated corridor segment can legitimately run
+     straight through another room's corner as part of its own main
+     route (e.g. a vertical corridor flush against a room's side wall,
+     crossing that wall's corner exactly where the room's floor ends) —
+     severing that isn't discarding a cosmetic dead end, it's cutting the
+     corridor in half. That version disconnected roughly 2/3 of generated
+     levels entirely (confirmed by a scratch regression test comparing
+     both versions across 1000 seeds) before being caught. **If you ever
+     touch corner/door logic again, run a same-shape check**: generate
+     many levels and assert `computeFlow().dist` at `ENTRANCE` is finite
+     with zero towers built — a room merely being non-empty or scoring
+     well on the existing quality/path-length gate does NOT imply the
+     level is actually connected end to end.
      Returns a quality score; `genLevel()` retries (seed+i) until score ≥
      60 buildable tiles near the path AND path length ≥ 135 (verified this
      invariant doesn't hurt the retry success rate: 200/200 in a scratch

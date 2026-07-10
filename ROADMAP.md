@@ -38,17 +38,28 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
   article was hardcoded to only special-case tower type 1, so "Acid
   Blob" (also vowel-initial) was getting "a Acid Blob" — now computed
   generically from the tower's name.
-- **Two dungeon-generation correctness fixes.** Stairs (`<`/`>`) could
-  previously land on a bare corridor cell or even a wall, since
-  `ENTRANCE`/`EXIT` were just wherever the first/last path waypoint
-  happened to fall; `genRooms()` now force-places a room on each one
-  first, guaranteeing real room floor. Separately, a corridor that
-  merely grazed a room's corner could get turned into a door there —
-  diagonal-only from the room's actual floor (movement is orthogonal),
-  so it looked connected but wasn't reachable; room corners are now
-  explicitly excluded from door conversion. Both verified with a 300-trial
-  scratch test running the real generation functions directly (not a
-  hand-written mirror) — see `CLAUDE.md` section 2.
+- **Two dungeon-generation correctness fixes, one of which shipped a
+  regression that got caught and fixed in the same session.** Stairs
+  (`<`/`>`) could previously land on a bare corridor cell or even a
+  wall, since `ENTRANCE`/`EXIT` were just wherever the first/last path
+  waypoint happened to fall; `genRooms()` now force-places a room on
+  each one first, guaranteeing real room floor — this part is solid.
+  Separately, a corridor that merely grazed a room's corner could get
+  turned into a door there — diagonal-only from the room's actual floor,
+  so it looked connected but wasn't reachable — and the first fix
+  excluded *every* room corner from door conversion unconditionally.
+  That broke roughly 2/3 of generated levels: a corridor can legitimately
+  run straight through a corner as part of its own main route (not just
+  graze it diagonally), and severing those disconnected the entrance
+  from the exit entirely. Fixed properly: a corner is only skipped as a
+  door site when NEITHER orthogonal neighbor is also on the path
+  (`isolatedCorner()`) — a corner with a path neighbor on either side is
+  load-bearing and still becomes a door. See `CLAUDE.md` section 2 for
+  the full story and, more importantly, the regression test pattern to
+  reuse if you ever touch this code again: score/path-length passing the
+  existing quality gate does NOT imply the level is actually connected —
+  you have to check `computeFlow().dist` at `ENTRANCE` is finite with
+  zero towers built, across many seeds.
 - **Tower unlocking, and an early-game economy tune-down.** A second
   progression axis alongside player level: only the Archer (`TOWERS[1]`,
   renamed from Wand of Striking) is available from a fresh game — every
