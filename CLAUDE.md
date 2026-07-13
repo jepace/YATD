@@ -24,15 +24,28 @@ The `<script>` is organized top-to-bottom in sections (marked with
    - `genPath()` makes serpentine orthogonal waypoints (x-columns strictly
      increase, so the path can never self-cross); `genRooms(cells,
      forceCells)` seeds room rects on random path cells, rejecting
-     overlaps (2-cell margin). `forceCells` (always `[wp[0], wp[last]]`,
-     the entrance/exit waypoints) get a room placed on them FIRST,
-     unconditionally, via the same `x1`/`y1` formula the random rooms
-     use — provably, that formula's clamps only ever move a room's
-     origin toward its seed cell, never past it, so the seed cell always
-     ends up inside the room's own floor rectangle. This guarantees the
-     stairs always land on real room floor, never a bare corridor or a
-     wall — before this, `ENTRANCE`/`EXIT` were just wherever the first/
-     last path waypoint happened to fall, with no such guarantee.
+     overlaps (3-cell margin — widened from 2 so two independently-valid
+     doors on adjacent rooms don't visually merge into a wider gap than
+     either one alone). It also rejects a candidate room outright if any
+     of its 4 walls would run flush alongside 2+ *other* path cells
+     (`wallHasParallelRun`, checked against the raw path-cell list, not
+     the carved map) — a corridor that merely tracks parallel to a wall
+     for a stretch would otherwise turn every one of those cells into a
+     door in `buildLevel()`'s carving pass, reading as one wide gap
+     stacked with redundant doorways rather than a real doorway. Forced
+     rooms (see below) can't be rejected outright since they must
+     succeed, so they instead re-roll `roomAt`'s random size/offset up to
+     20 times looking for a parallel-run-free placement, falling back to
+     the last attempt if none turn up clean. `forceCells` (always
+     `[wp[0], wp[last]]`, the entrance/exit waypoints) get a room placed
+     on them FIRST, unconditionally, via the same `x1`/`y1` formula the
+     random rooms use — provably, that formula's clamps only ever move a
+     room's origin toward its seed cell, never past it, so the seed cell
+     always ends up inside the room's own floor rectangle. This
+     guarantees the stairs always land on real room floor, never a bare
+     corridor or a wall — before this, `ENTRANCE`/`EXIT` were just
+     wherever the first/last path waypoint happened to fall, with no such
+     guarantee.
    - `buildLevel()` carves into `map`/`path`/`pathIdx` (all mutated IN
      PLACE so `window.YATD` references stay valid): rock `' '` → corridor
      `#`, room walls → doors `+`, room floor `.` untouched — EXCEPT a

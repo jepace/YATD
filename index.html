@@ -195,19 +195,55 @@ function pathCells(wp) {
 function genRooms(cells, forceCells) {
   const rooms = [];
   const clash = (r) => rooms.some(o =>
-    r[0] - 2 <= o[2] && o[0] - 2 <= r[2] && r[1] - 2 <= o[3] && o[1] - 2 <= r[3]);
+    r[0] - 3 <= o[2] && o[0] - 3 <= r[2] && r[1] - 3 <= o[3] && o[1] - 3 <= r[3]);
+  // reject a room whose wall would run flush alongside 2+ consecutive path
+  // cells (excluding its own corners) -- that's a *different* corridor
+  // segment tracking parallel to the wall for a stretch, which the door-
+  // conversion pass in buildLevel would otherwise turn into a row of
+  // doors stacked on top of each other (looks broken, reads as one wide
+  // gap rather than a real doorway). Rejecting the placement is safer
+  // than trying to selectively suppress some of those doors after the
+  // fact: door cells are load-bearing for the corridor's own contiguity
+  // (see buildLevel's isolatedCorner comment) and can't just be walled
+  // back up without risking a repeat of that disconnection bug.
+  const cellSet = new Set(cells.map(([x, y]) => x + "," + y));
+  const wallHasParallelRun = ([x1, y1, x2, y2]) => {
+    const sides = [
+      { axis: "x", fixed: y1 - 1, from: x1 - 1, to: x2 + 1 }, // top
+      { axis: "x", fixed: y2 + 1, from: x1 - 1, to: x2 + 1 }, // bottom
+      { axis: "y", fixed: x1 - 1, from: y1 - 1, to: y2 + 1 }, // left
+      { axis: "y", fixed: x2 + 1, from: y1 - 1, to: y2 + 1 }, // right
+    ];
+    return sides.some(s => {
+      let count = 0;
+      for (let v = s.from + 1; v < s.to; v++) { // exclude the two corner endpoints
+        const key = s.axis === "x" ? v + "," + s.fixed : s.fixed + "," + v;
+        if (cellSet.has(key)) count++;
+      }
+      return count >= 2;
+    });
+  };
   const roomAt = (cx, cy) => {
     const w = ri(5, 9), h = ri(3, 5);
     const x1 = Math.max(1, Math.min(77 - w, cx - ri(0, w)));
     const y1 = Math.max(1, Math.min(19 - h, cy - ri(0, h)));
     return [x1, y1, x1 + w, y1 + h];
   };
-  for (const [cx, cy] of forceCells || []) rooms.push(roomAt(cx, cy));
+  // forced rooms (entrance/exit) must succeed unconditionally -- see
+  // buildLevel -- so instead of a reject-and-retry loop (which could run
+  // out of tries and leave the stairs unplaced), re-roll roomAt's random
+  // size/offset up to 20 times looking for one without a parallel run,
+  // falling back to whatever the last attempt was if none turn up clean
+  for (const [cx, cy] of forceCells || []) {
+    let r = roomAt(cx, cy);
+    for (let t = 0; t < 20 && wallHasParallelRun(r); t++) r = roomAt(cx, cy);
+    rooms.push(r);
+  }
   let tries = 0;
   while (rooms.length < 8 && tries++ < 250) {
     const [cx, cy] = cells[ri(0, cells.length - 1)];
     const r = roomAt(cx, cy);
-    if (!clash(r)) rooms.push(r);
+    if (!clash(r) && !wallHasParallelRun(r)) rooms.push(r);
   }
   return rooms;
 }
