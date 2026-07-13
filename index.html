@@ -1005,7 +1005,7 @@ function damageCreep(c, dmg, dtype) {
       "The " + m.name + " is destroyed. (+" + bounty + " zorkmids)",
       "You have slain the " + m.name + ". (+" + bounty + " zorkmids)",
       "The " + m.name + " falls. (+" + bounty + " zorkmids)",
-      "The " + m.name + " is reduced to a smoking ruin. (+" + bounty + " zorkmids)",
+      "The " + m.name + " is no more. (+" + bounty + " zorkmids)",
     ]));
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
