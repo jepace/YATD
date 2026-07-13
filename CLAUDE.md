@@ -168,8 +168,11 @@ The `<script>` is organized top-to-bottom in sections (marked with
    level, above) was raised at the same time for the same reason.
 
    **Tower unlocking** is a second progression axis, independent of
-   player level: `TOWERS[1]` (Archer) is the only type in `G.unlocked`
-   (`{ 1: true }`) on a fresh `resetGame()`; every other type carries
+   player level: `TOWERS[1]` (Archer) and `TOWERS[6]` (Dirt Wall) are the
+   only types in `G.unlocked` (`{ 1: true, 6: true }`) on a fresh
+   `resetGame()` — the cheap, no-refund maze-shaping basics, so a new
+   player always has a way to experiment with the maze mechanic even
+   before earning any unlock gold; every other type carries
    `unlockCost`, a flat one-time gold payment (NOT dlvl-scaled like
    `towerCost`) that `unlockTower(type)` spends to permanently add it to
    `G.unlocked` — it never re-locks and, like `G.gold`/`G.plevel`,

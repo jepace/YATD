@@ -375,14 +375,17 @@ const TERRAIN_COLOR = {
 // creep chips just by touching it. This is the counter to a "pipe of
 // death" corridor: a maze that's 100% safe from melee once built no
 // longer stays that way once a siege-flagged monster reaches it.
-// TOWERS[1] (Archer) is the only type available from a fresh game --
-// every other type carries `unlockCost`, a one-time flat (not dlvl-
-// scaled, unlike `towerCost`) gold payment that permanently adds it to
-// `G.unlocked` (see unlockTower()); it never re-locks and persists
-// across a descend() same as G.gold/G.plevel do. This is a second,
-// separate progression axis from player level: player level gates how
-// far a tower you already have access to can be enchanted, unlocking
-// gates whether you have access to a tower type at all.
+// TOWERS[1] (Archer) and TOWERS[6] (Dirt Wall) are the only types
+// available from a fresh game -- every other type carries `unlockCost`,
+// a one-time flat (not dlvl-scaled, unlike `towerCost`) gold payment
+// that permanently adds it to `G.unlocked` (see unlockTower()); it never
+// re-locks and persists across a descend() same as G.gold/G.plevel do.
+// This is a second, separate progression axis from player level: player
+// level gates how far a tower you already have access to can be
+// enchanted, unlocking gates whether you have access to a tower type at
+// all. Dirt Wall starts unlocked alongside the Archer since it's the
+// cheap, no-refund maze-shaping option -- gating the one tool that lets
+// a new player experiment with the maze mechanic at all felt wrong.
 const TOWERS = {
   1: { ch: "/", name: "Archer", cost: 18, dmg: 5, range: 5.0, cd: 0.55,
        kind: "bolt", blocks: true, maxCharges: 25, siegeHp: 30, fg: "#e8e850",
@@ -400,7 +403,7 @@ const TOWERS = {
        kind: "chain", blocks: true, maxCharges: 12, chainCount: 2, chainRange: 3.5,
        chainFalloff: 0.6, siegeHp: 50, fg: "#c8f0ff",
        desc: "arcs to 2 more targets; limited charges, recharges slowly" },
-  6: { ch: "%", name: "Dirt Wall", cost: 8, unlockCost: 15, range: 0, cd: 0,
+  6: { ch: "%", name: "Dirt Wall", cost: 8, range: 0, cd: 0,
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
@@ -675,7 +678,7 @@ const G = {
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
   inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
-  unlocked: { 1: true },               // tower types permanently bought with unlockTower()
+  unlocked: { 1: true, 6: true },      // tower types permanently bought with unlockTower()
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
 };
@@ -726,7 +729,7 @@ function resetGame() {
   G.seed = SEED;
   G.inv = { scroll: 0, potion: 0, wand: 0, charge: 0 }; G.hasteUntil = 0;
   G.state = "build"; G.gold = 40; G.hp = 20; G.wave = 0;
-  G.score = 0; G.kills = 0; G.xp = 0; G.plevel = 1; G.unlocked = { 1: true };
+  G.score = 0; G.kills = 0; G.xp = 0; G.plevel = 1; G.unlocked = { 1: true, 6: true };
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
   G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
@@ -1647,7 +1650,7 @@ function drawHelp() {
     " 3 { Frost Fountain    $20  slows, blocks, LOS -- unlock $35",
     " 4 ^ Fire Trap         $15  ON the corridor #  -- unlock $30",
     " 5 \\ Wand of Lightning $30  arcs to 2 more     -- unlock $70",
-    " 6 % Dirt Wall         $8   pure block, hp      -- unlock $15",
+    " 6 % Dirt Wall         $8   pure block, hp -- free from start",
     "Enchant up to L" + MAX_LVL + " in the menu -- capped by Lv (kill XP).",
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",

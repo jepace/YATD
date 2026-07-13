@@ -62,15 +62,16 @@ ever ambiguous about what it is.
 | `3` | `{`   | Frost Fountain    | $20  | $35    | Chills and slows monsters in range |
 | `4` | `^`   | Fire Trap         | $15  | $30    | Burns monsters — place ON the corridor |
 | `5` | `\`   | Wand of Lightning | $30  | $70    | Arcs to 2 more targets after the first |
-| `6` | `%`   | Dirt Wall         | $8   | $15    | Pure obstacle, no offense — see below |
+| `6` | `%`   | Dirt Wall         | $8   | free   | Pure obstacle, no offense — see below |
 
 Prices above are Dlvl 1 baseline — every build and enchant costs more
 the deeper you descend (gold you're still holding onto by Dlvl 5 buys
 noticeably less than it did up top), so don't bank on stockpiling early
 and coasting on it later.
 
-**Only the Archer is available from a fresh game.** Every other tower
-type has to be unlocked first with a one-time gold payment — the
+**Only the Archer and Dirt Wall are available from a fresh game** — the
+cheap, no-refund maze-shaping basics. Every other tower type has to be
+unlocked first with a one-time gold payment — the
 tile-action menu shows `Unlock <tower> ($cost, one-time)` in place of
 the normal build option on any tile where that tower could go, and
 paying it adds the type to your toolkit for the rest of the run (it

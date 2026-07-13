@@ -19,6 +19,11 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Dirt Wall starts unlocked alongside the Archer.** `G.unlocked`'s
+  fresh-game default is now `{ 1: true, 6: true }` instead of just
+  `{ 1: true }` — a new player has a way to shape the maze from turn one
+  without needing to save up unlock gold first. `TOWERS[6]`'s
+  `unlockCost` field was removed since it's no longer meaningful.
 - **Wand of charging is now targeted, not a blanket effect.** Follow-up
   to a report that it "just charges everything" while its two sibling
   consumables are aimed — `c` now arms `G.targeting` (`beginCharge()`,
