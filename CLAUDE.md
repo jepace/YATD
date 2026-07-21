@@ -578,6 +578,19 @@ The `<script>` is organized top-to-bottom in sections (marked with
    list are gone — don't reintroduce a persistent tool-select control,
    that's the exact UX this replaced.
 
+   Every cost-gated option (upgrade, unlock, build — never sell, which
+   has no cost) also carries `disabled: true` when you currently can't
+   afford or use it (not enough gold, or for upgrade specifically, player
+   level too low — see section 3). `drawMenu()` renders a disabled
+   option's line in a dim grey (`#5a5a4a`) instead of the normal bright
+   green, so you can see at a glance what's actually available without
+   reading every price. This is purely a rendering hint: a disabled
+   option is still clickable and still calls its normal action, which
+   still does its own affordability check and shows the usual refusal
+   message — `disabled` never gates behavior, only color, so the two can
+   never drift out of sync with each other by construction (there's only
+   one source of truth for "can I afford this," reused for both).
+
    The menu is a lightweight popup, not a modal: unmatched keys fall
    through to the rest of `keydown` while it's open (so `hjkl` cursor
    movement, item hotkeys, etc. keep working), unlike the three big

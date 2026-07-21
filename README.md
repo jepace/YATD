@@ -195,9 +195,12 @@ cursor onto it and press `ENTER`) and a menu pops up right there**
 listing everything legal on that specific tile: which towers you can
 build, or an existing tower's current stats plus upgrade/sell. Press the
 `[key]` shown next to an option, or click that option's line directly.
-Opening the menu (or the inventory/help/log) automatically pauses a
-running wave; closing it resumes automatically, so you're never racing
-the clock while deciding what to build.
+Anything you can't currently afford (or, for enchanting, don't have the
+player level for) is greyed out at a glance, so you don't have to read
+every price to see what's actually on the table right now. Opening the
+menu (or the inventory/help/log) automatically pauses a running wave;
+closing it resumes automatically, so you're never racing the clock
+while deciding what to build.
 
 - **Mouse** — click a tile to open its menu, click an option line to run
   it, click elsewhere to switch tiles, click the same tile again (or

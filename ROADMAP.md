@@ -19,6 +19,15 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Unaffordable menu options are greyed out.** Every cost-gated option
+  in the tile-action menu (upgrade, unlock, build — not sell, which has
+  no cost) now renders dim grey when you can't currently afford it or
+  (for upgrade) don't have the player level for it, instead of looking
+  identical to something you can actually do. Purely a rendering hint —
+  the option is still clickable and still runs its normal action with
+  its own affordability check, so there's only one source of truth for
+  "can I afford this," reused for both the color and the click. See
+  `CLAUDE.md` section 7.
 - **Player level pacing steepened, and the cap raised from 4 to 6.**
   Follow-up to a report that player level (and thus the tower enchant
   ceiling) was still climbing too fast even after the previous economy

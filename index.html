@@ -994,13 +994,16 @@ function menuOptions(x, y) {
   if (t) {
     const opts = [];
     if (t.lvl < MAX_LVL) {
-      const label = t.lvl < playerMaxTowerLvl()
-        ? "Upgrade to L" + (t.lvl + 1) + " ($" + upgradeCost(t) + ")"
-        : "Upgrade to L" + (t.lvl + 1) + " (need player level " + (t.lvl + 1) + ")";
-      opts.push({ key: "u", label, action: () => upgradeTower(t), keepOpen: true });
+      const levelLocked = t.lvl >= playerMaxTowerLvl();
+      const cost = upgradeCost(t);
+      const label = levelLocked
+        ? "Upgrade to L" + (t.lvl + 1) + " (need player level " + (t.lvl + 1) + ")"
+        : "Upgrade to L" + (t.lvl + 1) + " ($" + cost + ")";
+      opts.push({ key: "u", label, action: () => upgradeTower(t), keepOpen: true,
+                  disabled: levelLocked || G.gold < cost });
     }
     opts.push({ key: "s", label: "Sell (+$" + Math.floor(t.spent * SELL_REFUND_MULT) + ")",
-                action: () => sellTower(t), keepOpen: true });
+                action: () => sellTower(t), keepOpen: true }); // always doable, never greyed
     return { tower: t, opts };
   }
   const opts = [];
@@ -1010,10 +1013,11 @@ function menuOptions(x, y) {
     if (!ok) continue;
     if (!G.unlocked[n]) {
       opts.push({ key: String(n), label: "Unlock " + spec.ch + " " + spec.name + " ($" + spec.unlockCost + ", one-time)",
-                  action: () => unlockTower(n), keepOpen: true });
+                  action: () => unlockTower(n), keepOpen: true, disabled: G.gold < spec.unlockCost });
     } else {
-      opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + towerCost(n) + ")",
-                  action: () => buildTower(n, x, y) });
+      const cost = towerCost(n);
+      opts.push({ key: String(n), label: spec.ch + " " + spec.name + " ($" + cost + ")",
+                  action: () => buildTower(n, x, y), disabled: G.gold < cost });
     }
   }
   return { tower: null, opts };
@@ -1704,7 +1708,8 @@ function drawMenu() {
   if (!opts.length) {
     text(bx0 + 2, row, "Nothing can be built here.", "#8a8a6a");
   } else {
-    opts.forEach((o, i) => text(bx0 + 2, row + i, "[" + o.key + "] " + o.label, "#c8e8b8"));
+    opts.forEach((o, i) => text(bx0 + 2, row + i, "[" + o.key + "] " + o.label,
+      o.disabled ? "#5a5a4a" : "#c8e8b8"));
   }
   text(bx0 + 2, by0 + h - 1, "ESC to close", "#6a8a6a");
 }
