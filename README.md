@@ -22,7 +22,11 @@ Clear wave 10 and you descend to the next dungeon level instead of the
 game ending: a brand new map, a harder wave set, and the same gold and
 HP you finished with (plus a small heal for the stairs down). Do that
 five times — Dlvl 5 — and you win. Towers don't carry over between
-levels, so every floor is a fresh maze to build.
+levels, so every floor is a fresh maze to build — but they're not a
+total loss either: everything left standing when you descend gets
+auto-refunded at 40% of what you paid for it (worse than the 70% you'd
+get selling by hand, so sell first if you can, but you're never just
+throwing a full build away).
 
 Like NetHack, **every game is different**: every dungeon level is
 freshly procedurally generated, wave compositions are randomized, and

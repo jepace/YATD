@@ -455,6 +455,12 @@ const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
 // and clearing waves without a single tower past L1 -- the early game
 // was simply too lucrative to ever feel like resources mattered.
 const BOUNTY_MULT = 0.75;
+// manual sell refund (sellTower) vs. the automatic bulk refund on
+// descend() -- deliberately worse than selling by hand, so selling
+// before a level ends (when you have the choice) stays the better move;
+// this only exists so towers you're forced to abandon aren't a total
+// loss, not to make hoarding-then-descending as good as selling.
+const SELL_REFUND_MULT = 0.7, DESCEND_REFUND_MULT = 0.4;
 // player level gates how far ANY tower can be enchanted, independent of
 // gold -- a fresh player level 1 can only bring towers to L1 even with
 // gold to spare, same as MAX_LVL always has, but now MAX_LVL is only
@@ -788,17 +794,25 @@ function descend() {
   genLevel();
   genWaves(G.dlvl);
   G.wave = 0;
+  // towers don't carry over to the new map, but leaving them behind
+  // entirely would punish a full build with no way to recover any of it
+  // -- refund them in bulk, at a worse rate than selling by hand
+  // (SELL_REFUND_MULT), so manually selling before a level ends stays
+  // the better move whenever you actually have that choice
+  const refund = G.towers.reduce((sum, t) => sum + Math.floor(t.spent * DESCEND_REFUND_MULT), 0);
+  G.gold += refund;
   G.towers = []; G.creeps = []; G.fx = [];
   G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
   G.state = "build";
+  const refundMsg = refund ? "  Your abandoned towers dissolve into (+" + refund + " zorkmids)." : "";
   message(pick([
     "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
     "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
     "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
-  ]));
+  ]) + refundMsg);
 }
 
 function startWave() {
@@ -947,7 +961,7 @@ function upgradeTower(t) {
 }
 function sellTower(t) {
   if (!t) return;
-  const refund = Math.floor(t.spent * 0.7);
+  const refund = Math.floor(t.spent * SELL_REFUND_MULT);
   G.gold += refund;
   G.towers = G.towers.filter(x => x !== t);
   // G.menu (if open on this tile) is left as-is -- menuOptions() is
@@ -981,7 +995,7 @@ function menuOptions(x, y) {
         : "Upgrade to L" + (t.lvl + 1) + " (need player level " + (t.lvl + 1) + ")";
       opts.push({ key: "u", label, action: () => upgradeTower(t), keepOpen: true });
     }
-    opts.push({ key: "s", label: "Sell (+$" + Math.floor(t.spent * 0.7) + ")",
+    opts.push({ key: "s", label: "Sell (+$" + Math.floor(t.spent * SELL_REFUND_MULT) + ")",
                 action: () => sellTower(t), keepOpen: true });
     return { tower: t, opts };
   }

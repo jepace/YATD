@@ -19,6 +19,27 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Abandoned towers are auto-refunded on descend.** `descend()` used to
+  clear `G.towers` with zero refund, and there's no real window to sell
+  manually beforehand since you still need those towers to survive wave
+  10. Now sums `Math.floor(t.spent * DESCEND_REFUND_MULT)` (0.4, worse
+  than `sellTower`'s manual 0.7) across all towers before clearing them
+  and folds it into the descend message. See `CLAUDE.md` section 4.
+- **Clearer feedback when a build fails because a monster is mid-step
+  onto that tile.** Creeps render only at their discrete cell, not
+  interpolated, so a tile they're already committed to stepping into
+  (`creepReserves(x,y)`) could look completely empty on screen while
+  still correctly refusing a build. `buildTower()` now gives a distinct
+  message for that case, and the hovered tile gets a subtle tint.
+- **Room walls no longer get a stack of redundant doors.** A corridor
+  that ran flush alongside a room's wall for a stretch used to turn
+  every one of those cells into a door — one wide gap with several
+  doorways stacked on it, not a real doorway. `genRooms()` now rejects
+  (or, for the entrance/exit's forced rooms, re-rolls) any room
+  placement whose wall would run flush alongside 2+ other path cells;
+  verified with a 500-seed scratch test that this doesn't regress
+  connectivity (see the corner-door regression above — this kind of
+  change gets a same-shape connectivity check every time now).
 - **Dirt Wall starts unlocked alongside the Archer.** `G.unlocked`'s
   fresh-game default is now `{ 1: true, 6: true }` instead of just
   `{ 1: true }` — a new player has a way to shape the maze from turn one

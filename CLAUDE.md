@@ -417,6 +417,16 @@ The `<script>` is organized top-to-bottom in sections (marked with
    sense on it), `G.flow`/`G.flowFly` recomputed, and a small stairwell
    heal (`+25%` of missing HP) — but gold, score, and the rest of HP
    carry over. Only at `MAX_DLVL`'s wave 10 does the state become `won`.
+   Abandoned towers aren't a total loss: `descend()` sums
+   `Math.floor(t.spent * DESCEND_REFUND_MULT)` (0.4) across `G.towers`
+   before clearing them and adds it to `G.gold`, folded into the same
+   descend message rather than a separate `message()` call (a second
+   call would just overwrite the first, since `G.msg` only ever holds
+   one line). Deliberately worse than `sellTower`'s manual
+   `SELL_REFUND_MULT` (0.7), so selling by hand stays the better move
+   whenever you actually have the choice — this exists only so a full
+   build isn't wasted when a level ends out from under you, not to make
+   hoarding-then-descending competitive with selling.
    If you add anything else that should reset per-level (as opposed to
    per-game), it needs a line in both `resetGame()` AND `descend()` —
    they're intentionally separate functions, not one calling the other,
