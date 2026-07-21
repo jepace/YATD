@@ -341,13 +341,18 @@ const terrainWalkable = (x, y) => {
   const g = map[y] && map[y][x];
   return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{";
 };
+// true if a live creep currently sits on (x,y) OR is already mid-step
+// toward it -- creeps render only at their discrete c.x,c.y (no smooth
+// interpolation toward c.nx,c.ny), so a reserved-but-not-yet-arrived cell
+// can look completely empty on screen for the whole duration of that
+// step. Reserving it anyway is still correct: creeps only reroute when
+// they FINISH a step (see advanceTarget/updateCreeps), so a blocking
+// tower dropped onto their already-committed next cell would leave them
+// stranded on top of it with nowhere to go, not smoothly rerouted.
+const creepReserves = (x, y) =>
+  G.creeps.some(c => !c.dead && ((c.x === x && c.y === y) || (c.nx === x && c.ny === y)));
 const buildable = (x, y) =>
-  map[y] && map[y][x] === "." && !towerAt(x, y) &&
-  // block placement under a creep's current cell AND the cell it's
-  // already committed to stepping into (mid-transit), so a blocking
-  // tower can never land exactly where a monster is about to arrive
-  !G.creeps.some(c => !c.dead &&
-    ((c.x === x && c.y === y) || (c.nx === x && c.ny === y)));
+  map[y] && map[y][x] === "." && !towerAt(x, y) && !creepReserves(x, y);
 const trapPlaceable = (x, y) => {
   const g = map[y] && map[y][x];
   return (g === "#" || g === "+") && !towerAt(x, y);
@@ -874,9 +879,14 @@ function buildTower(type, x, y) {
   if (!G.unlocked[type]) { message("You haven't learned to conjure a " + spec.name + " yet."); return false; }
   const ok = spec.kind === "trap" ? trapPlaceable(x, y) : buildable(x, y);
   if (!ok) {
+    // give a specific reason when a creep (not terrain) is the blocker --
+    // it can render as an empty tile mid-step (see creepReserves), so a
+    // generic refusal would look like a bug rather than a timing issue
     message(spec.kind === "trap"
       ? "Traps only work laid across open corridor or a doorway."
-      : "You cannot build there.");
+      : creepReserves(x, y)
+        ? "A monster is already moving onto that tile -- wait a beat and try again."
+        : "You cannot build there.");
     return false;
   }
   if (spec.blocks && wouldSealPath(x, y)) {
@@ -1510,6 +1520,12 @@ function drawGame() {
   const menuTower = G.menu && towerAt(G.menu.x, G.menu.y);
   if (menuTower) drawRange(menuTower.x, menuTower.y, towerRange(menuTower), "#12241a");
   if (G.targeting) drawRange(hx, hy, G.targeting.radius, "#2a1a1a");
+  // a hovered tile that looks empty but is reserved by a creep mid-step
+  // (see creepReserves) would otherwise refuse a build with no visible
+  // reason -- flag it right where the player is already looking
+  if (hy >= 0 && hy < MAPH && map[hy][hx] === "." && !towerAt(hx, hy) && creepReserves(hx, hy)) {
+    buf[MAPY + hy][hx].bg = "#4a2020";
+  }
 
   for (const t of G.towers) {
     const spec = TOWERS[t.type];
