@@ -391,7 +391,7 @@ The `<script>` is organized top-to-bottom in sections (marked with
    *this* level's dragon color, not a stale one from a previous descent.
 
    **Player level gates tower enchantment**, independent of gold:
-   `G.plevel` (1–4) is computed from cumulative kill XP
+   `G.plevel` (1–6) is computed from cumulative kill XP
    (`PLAYER_XP_THRESHOLDS`, `playerLevelForXp()`) via `gainXp()`, called
    from `damageCreep()`'s kill branch with `m.bounty` as the XP amount —
    deliberately called *last* in that branch (after the kill/boss

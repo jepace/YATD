@@ -19,6 +19,18 @@ multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
 5, difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Player level pacing steepened, and the cap raised from 4 to 6.**
+  Follow-up to a report that player level (and thus the tower enchant
+  ceiling) was still climbing too fast even after the previous economy
+  pass. `PLAYER_XP_THRESHOLDS` went from `[0,100,300,800]` to
+  `[0,150,500,1400,3200,7000]` — steeper (~2.5-3x per level instead of
+  ~2.7x from a much lower base) and two levels longer. `MAX_LVL` (the
+  absolute tower enchant ceiling, `playerMaxTowerLvl`'s cap) went from 4
+  to 6 alongside it, so there's real new headroom above where the old
+  cap sat, not just a slower climb to the same wall. No other code
+  needed to change — `UPG_MULT`/charge/HP scaling and `upgradeCost` all
+  already generalize to any `t.lvl`, they just hadn't had reason to go
+  past 4 before.
 - **Abandoned towers are auto-refunded on descend.** `descend()` used to
   clear `G.towers` with zero refund, and there's no real window to sell
   manually beforehand since you still need those towers to survive wave

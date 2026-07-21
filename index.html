@@ -448,7 +448,7 @@ const TOWERS = {
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
-const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 4;
+const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 6;
 // trims both gold income and XP together (see damageCreep) -- a single
 // economy-wide knob. Dropped to 0.75 after reports of finishing Dlvl 1
 // already at max player level, sitting on hundreds of unspent zorkmids,
@@ -467,10 +467,14 @@ const SELL_REFUND_MULT = 0.7, DESCEND_REFUND_MULT = 0.4;
 // reachable once G.plevel itself reaches it. XP is earned per kill
 // (gainXp, called from damageCreep) and persists across a descend() the
 // same way G.gold/G.score do -- resetGame() is the only place it resets.
-// Thresholds are deliberately steep past level 2: reaching MAX_LVL (4)
-// should feel like a real milestone earned over multiple dungeon levels,
-// not something that happens by wave 9 of Dlvl 1.
-const PLAYER_XP_THRESHOLDS = [0, 100, 300, 800]; // cumulative xp for player level 1,2,3,4
+// Thresholds grow exponentially (roughly 2.5-3x per level, steeper than
+// the previous [0,100,300,800]): even level 2 took only until wave 9 of
+// Dlvl 1 under the old curve, well before BOUNTY_MULT's income trim
+// could compensate on its own. MAX_LVL was raised from 4 to 6 alongside
+// this so there's still real headroom above where the old cap sat --
+// reaching it now should feel like a late-game, multi-dungeon-level
+// achievement, not something a single strong level 1 clears.
+const PLAYER_XP_THRESHOLDS = [0, 150, 500, 1400, 3200, 7000]; // cumulative xp for player level 1-6
 function playerLevelForXp(xp) {
   let lvl = 1;
   for (let i = 1; i < PLAYER_XP_THRESHOLDS.length; i++) if (xp >= PLAYER_XP_THRESHOLDS[i]) lvl = i + 1;
@@ -1546,7 +1550,7 @@ function drawGame() {
     const empty = spec.maxCharges && Math.floor(t.charges) < 1;
     const cracked = (spec.hp && t.hp < towerMaxHp(t) * 0.4) ||
                     (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t) * 0.4);
-    const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000"][t.lvl] || spec.fg;
+    const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000", "#a0ffb0", "#ff6060"][t.lvl] || spec.fg;
     const fg = (empty || cracked) ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
     const picked = G.menu && G.menu.x === t.x && G.menu.y === t.y;
     put(t.x, MAPY + t.y, spec.ch, fg, picked ? "#243024" : undefined);
