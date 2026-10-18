@@ -641,10 +641,17 @@ function pickDragon() {
 // monster classes -- same glyph, different tier -- and Just Works since
 // rendering reads `MONSTERS[c.type].ch`, not the type key itself.
 const WAVES = [];
-function genWaves(dlvl) {
+function genWaves(dlvl, countMul) {
   WAVES.length = 0;
   dlvl = dlvl || 1;
-  const dlvlMul = Math.pow(1.35, dlvl - 1);
+  // monster COUNT grows exponentially only through Dlvl 5 (the original
+  // tuned range), then linearly -- the dungeon is endless now, and
+  // 1.35^(dlvl-1) would mean ~300x the spawns by Dlvl 20. Past 5 the
+  // difficulty keeps climbing mainly through HP (waveHpScale stays
+  // exponential) and the per-level modifier (G.levelMod), not sheer
+  // creep count.
+  const dlvlMul = Math.pow(1.35, Math.min(dlvl, 5) - 1) * (1 + 0.03 * Math.max(0, dlvl - 5)) *
+    (countMul || 1);
   const pool = [
     { t: "rat",       cost: 1,  gap: 0.7, min: 1, minDlvl: 1, maxDlvl: 3 },
     { t: "gridbug",   cost: 1,  gap: 0.3, min: 1, minDlvl: 1, maxDlvl: 2 },
@@ -707,7 +714,21 @@ function isSubmerged(c) {
   return !!m.submerges && ((G.time + c.subPhase) % 4) < 1.5;
 }
 
-const MAX_DLVL = 5;   // clearing wave 10 here brings the real dragon fight
+// The dungeon has no bottom: every wave-10 clear descends again, forever,
+// and the run only ends in death. From Dlvl 6 on (past the originally
+// tuned 1-5 range), each level also rolls one random LEVEL_MODS twist
+// (seeded, so ?seed=N replays match), announced on arrival.
+const ENDLESS_MOD_DLVL = 6;
+const LEVEL_MODS = [
+  { id: "swarm",  count: 1.4,  hp: 0.8,  msg: "You hear the skittering of countless feet." },
+  { id: "brutes", count: 0.75, hp: 1.45, msg: "The air reeks of something very large." },
+  { id: "fleet",  spd: 1.25,             msg: "A cold wind rushes past you toward the stairs." },
+  { id: "hoard",  hp: 1.15, bounty: 1.5, msg: "You smell gold -- and blood." },
+  { id: "dark",   hp: 1.1,  spd: 1.1,    msg: "The torches gutter.  Something moves in the dark." },
+];
+function pickLevelMod(dlvl) {
+  return dlvl >= ENDLESS_MOD_DLVL ? pick(LEVEL_MODS) : null;
+}
 
 // generate the first dungeon now (title screen shows it); resetGame
 // reuses it for the first game, then regenerates for every game after
@@ -729,6 +750,7 @@ const G = {
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
   inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
+  levelMod: null, killedBy: null, epitaph: "",
   unlocked: { 1: true, 6: true },      // tower types permanently bought with unlockTower()
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
@@ -774,7 +796,7 @@ function setLore(type) {
 }
 
 function resetGame() {
-  G.dlvl = 1;
+  G.dlvl = 1; G.levelMod = null; G.killedBy = null; G.epitaph = "";
   if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
   else { genLevel(); genWaves(G.dlvl); }   // every later game is a new one
   G.seed = SEED;
@@ -796,7 +818,10 @@ function resetGame() {
 function descend() {
   G.dlvl++;
   genLevel();
-  genWaves(G.dlvl);
+  // picked after genLevel (which reseeds rnd) and before genWaves (which
+  // reads its count multiplier), so it's seeded and affects this level
+  G.levelMod = pickLevelMod(G.dlvl);
+  genWaves(G.dlvl, G.levelMod && G.levelMod.count);
   G.wave = 0;
   // towers don't carry over to the new map, but leaving them behind
   // entirely would punish a full build with no way to recover any of it
@@ -812,11 +837,30 @@ function descend() {
   G.flowFly = computeFlow(null, true);
   G.state = "build";
   const refundMsg = refund ? "  Your abandoned towers dissolve into (+" + refund + " zorkmids)." : "";
-  message(pick([
-    "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
-    "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
-    "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
-  ]) + refundMsg);
+  message((G.levelMod
+    ? "You descend to Dlvl " + G.dlvl + ".  " + G.levelMod.msg
+    : pick([
+      "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
+      "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
+      "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
+    ])) + refundMsg);
+}
+
+// ends the run -- records what did it (for the tombstone) and picks the
+// epitaph ONCE here, since drawLost() runs every frame and a pick()
+// there would flicker through all of them
+function die(killer) {
+  G.state = "lost";
+  G.killedBy = { name: killer.name, fg: killer.fg, boss: !!killer.boss };
+  G.epitaph = pick([
+    "The stairs were not held.",
+    "Should have built one more wall.",
+    "Died as they lived: hoarding zorkmids.",
+    "The maze had one gap.  It was enough.",
+    "Here lies a Keeper who kept nothing.",
+    "Went down with the dungeon.",
+    "Fell to the " + killer.name + ", of all things.",
+  ]);
 }
 
 function startWave() {
@@ -853,13 +897,17 @@ function spawnCreep(type) {
   const m = MONSTERS[type];
   // boss HP is flat across waves within a level (a short random path
   // must not make wave 10 unwinnable), but still grows with depth
-  const scale = m.boss ? Math.pow(1.2, G.dlvl - 1) : waveHpScale(G.wave, G.dlvl);
+  // the level modifier's hp twist skips the boss -- dragon HP already
+  // scales with depth on its own and is the fight most likely to tip
+  // into unwinnable
+  const mod = G.levelMod || {};
+  const scale = m.boss ? Math.pow(1.2, G.dlvl - 1) : waveHpScale(G.wave, G.dlvl) * (mod.hp || 1);
   const [sx, sy] = ENTRANCE;
   const c = {
     type, x: sx, y: sy, nx: sx, ny: sy, t: 0,
     hp: Math.round(m.hp * scale),
     maxHp: Math.round(m.hp * scale),
-    spd: m.spd * (0.85 + rnd() * 0.3),   // don't all march in lockstep
+    spd: m.spd * (mod.spd || 1) * (0.85 + rnd() * 0.3),   // don't all march in lockstep
     jit: ri(-1, 1),                      // a persistent lane, +-1 cell
     subPhase: rnd() * 4,                 // submerge cycle offset (eels)
     slowUntil: 0, hitFlash: 0,
@@ -1062,7 +1110,7 @@ function damageCreep(c, dmg, dtype) {
     // BOUNTY_MULT trims both gold income and XP together (gainXp uses the
     // same trimmed amount) -- a single economy-wide knob rather than
     // hand-editing all ~30 monsters' bounty fields individually
-    const bounty = Math.round(m.bounty * BOUNTY_MULT);
+    const bounty = Math.round(m.bounty * BOUNTY_MULT * ((G.levelMod && G.levelMod.bounty) || 1));
     G.gold += bounty; G.kills++; G.score += bounty * 10;
     if (m.boss) {
       message(pick([
@@ -1390,7 +1438,7 @@ function updateCreeps(dt) {
           "The " + m.name + " slips past you and flees below!  You lose " + m.leak + " HP.",
           "The " + m.name + " reaches the stairs and is gone!  You lose " + m.leak + " HP.",
         ]));
-        if (G.hp <= 0) { G.hp = 0; G.state = "lost"; }
+        if (G.hp <= 0) { G.hp = 0; die(m); }
         break;
       }
       advanceTarget(c);
@@ -1499,13 +1547,8 @@ function update(dt) {
     const bonus = 10 + G.wave * 2;
     G.gold += bonus; G.score += 100 * G.wave * G.dlvl;
     if (G.wave >= WAVES.length) {
-      if (G.dlvl >= MAX_DLVL) {
-        G.state = "won";
-        G.score += G.hp * 50;
-      } else {
-        descend();
-        if (G.autoStart) startWave();
-      }
+      descend();   // no final level -- the dungeon goes down forever
+      if (G.autoStart) startWave();
     } else {
       G.state = "build";
       message(pick([
@@ -1810,46 +1853,65 @@ function drawTitle() {
     drawCentered(["-- press any key to descend --"], 17, "#e8e850");
   drawCentered(["dungeon seed " + SEED + "  |  every game is a new dungeon"], 20, "#3a5a3a");
 }
-function drawWon() {
-  drawGame();
-  const y0 = 4;
-  for (let y = y0; y < y0 + 13; y++) for (let x = 14; x < 66; x++)
-    put(x, y, " ", "#4a7a4a", "#0a120a");
-  drawCentered([
-    "*  *  *  V I C T O R Y  *  *  *",
-    "",
-    "The last dragon falls.  The staircase crumbles behind it.",
-    "You feel the dungeon's gratitude wash over you.",
-    "",
-    "You ascend to demigodhood, having cleared Dlvl " + G.dlvl + "...",
-    "",
-    "Final score: " + G.score + "   Kills: " + G.kills + "   HP left: " + G.hp,
-    "",
-    "-- press R to play again --",
-  ], y0 + 1, "#e8e850");
-}
+// NetHack's own tombstone (the "rip" art from its topten.c), drawn as ONE
+// fixed-width block at a shared left edge -- centering each line on its
+// own (drawCentered) shifts every line by a different amount depending on
+// its length, which is what made the old stone's walls ragged. Content
+// lines are centered within the stone's 18-column face instead.
+const RIP = [
+  "               ----------",
+  "              /          \\",
+  "             /    REST    \\",
+  "            /      IN      \\",
+  "           /     PEACE      \\",
+  "          /                  \\",
+  "          |                  |",
+  "          |                  |",
+  "          |                  |",
+  "          |                  |",
+  "          |                  |",
+  "          |                  |",
+  "          |                  |",
+  "         *|     *  *  *      | *",
+  " ________)/\\\\_//(\\/(/\\)/\\//\\/|_)_______",
+];
 function drawLost() {
   clearBuf();
-  const dtext = "Dlvl " + G.dlvl + ", wave " + G.wave;
-  const padL = Math.floor(Math.max(0, 18 - dtext.length) / 2);
-  const padR = Math.max(0, 18 - dtext.length) - padL;
-  drawCentered([
-    "               ----------",
-    "              /          \\",
-    "             /    REST    \\",
-    "            /      IN      \\",
-    "           /     PEACE      \\",
-    "          /                  \\",
-    "          |     the Keeper   |",
-    "          |    " + String(G.score).padStart(6) + " points   |",
-    "          |   overrun by a   |",
-    "          |   monster horde  |",
-    "          |" + " ".repeat(padL) + dtext + " ".repeat(padR) + "|",
-    "         *|     *  *  *      | *",
-    " ________)/\\\\_//(\\/(/\\)/\\//\\/|_)_______",
-  ], 3, "#a8b8a8");
-  drawCentered(["Do you want your possessions identified? [ynq]  (q, obviously)"], 18, "#c8d8b8");
-  drawCentered(["-- press R to try again --"], 20, "#e8e850");
+  const w = Math.max(...RIP.map(s => s.length));
+  const x0 = Math.floor((COLS - w) / 2), y0 = 1;
+  RIP.forEach((s, i) => text(x0, y0 + i, s, "#a8b8a8"));
+  // flowers and grass get their own colors over the stone-grey base
+  RIP.forEach((s, i) => [...s].forEach((ch, j) => {
+    if (ch === "*") put(x0 + j, y0 + i, "*", "#e86080");
+    else if (i === RIP.length - 1 && "/\\()_".includes(ch) && j > 9 && j < 31) put(x0 + j, y0 + i, ch, "#5a8a4a");
+  }));
+  const face = (row, s, fg) =>
+    text(x0 + 11 + Math.floor((18 - s.length) / 2), y0 + row, s.slice(0, 18), fg || "#d8e8d8");
+  const kb = G.killedBy || { name: "monster horde", fg: "#d8e8d8", boss: false };
+  const art = kb.boss ? "the" : /^[aeiou]/i.test(kb.name) ? "an" : "a";
+  const nameLines = wrapText(kb.name, 18);
+  face(6, "Keeper");
+  face(7, G.gold + " Au");
+  face(8, "killed by " + art);
+  face(9, nameLines[0], kb.fg);
+  if (nameLines[1]) face(10, nameLines[1], kb.fg);
+  face(11, "Dlvl " + G.dlvl + ", wave " + G.wave);
+  face(12, String(new Date().getFullYear()));
+
+  drawCentered(['"' + (G.epitaph || "The stairs were not held.") + '"'], 17, "#8aa87a");
+  drawCentered(["Score " + G.score + "   Kills " + G.kills + "   Player Lv " + G.plevel +
+    "   Deepest: Dlvl " + G.dlvl], 18, "#c8d8b8");
+  drawCentered(["Do you want your possessions identified? [ynq] y"], 20, "#c8d8b8");
+  const inv = [
+    [G.inv.scroll, "scroll of fireball", "scrolls of fireball"],
+    [G.inv.potion, "potion of haste", "potions of haste"],
+    [G.inv.wand, "wand of cold", "wands of cold"],
+    [G.inv.charge, "wand of charging", "wands of charging"],
+  ].filter(([n]) => n > 0).map(([n, one, many]) => (n === 1 ? "a " + one : n + " " + many));
+  drawCentered(wrapText(inv.length
+    ? "You were carrying " + inv.join(", ") + ", unused."
+    : "You were carrying nothing but regrets.", 76).slice(0, 2), 21, "#8aa87a");
+  drawCentered(["-- press R to try again --"], 23, "#e8e850");
 }
 
 /* ---------- input ---------- */
@@ -1867,7 +1929,7 @@ canvas.addEventListener("mousemove", (e) => {
 });
 canvas.addEventListener("mousedown", (e) => {
   if (G.state === "title") { resetGame(); return; }
-  if (G.state === "won" || G.state === "lost") return;
+  if (G.state === "lost") return;
   const [x, y] = cellFromEvent(e);
   G.hover.x = x; G.hover.y = y;   // keep the range-preview in sync with the click
   if (y < 0 || y >= MAPH) return;
@@ -1944,7 +2006,7 @@ const DIRS = {
 window.addEventListener("keydown", (e) => {
   if (e.key === " ") e.preventDefault();
   if (G.state === "title") { resetGame(); return; }
-  if (G.state === "won" || G.state === "lost") {
+  if (G.state === "lost") {
     if (e.key === "r" || e.key === "R") resetGame();
     return;
   }
@@ -2058,7 +2120,6 @@ function frame(now) {
   acc += dt * G.speed;
   while (acc >= STEP) { update(STEP); acc -= STEP; }
   if (G.state === "title") { G.time += dt; drawTitle(); }
-  else if (G.state === "won") drawWon();
   else if (G.state === "lost") drawLost();
   else drawGame();
   blit();

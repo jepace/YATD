@@ -15,10 +15,20 @@ entirely), 6 tower types incl. limited wand charges (now on both wands,
 not just the striking one) and a destructible dirt wall, a 4th upgrade
 tier, 6 monster types beyond the original 5 (flying bat, submerging eel,
 splitting demon, grid bug filler) plus universal passive regen, and
-multiple dungeon levels (`descend()` past each wave 10, up to `MAX_DLVL`
-5, difficulty scaling with depth).
+multiple dungeon levels (`descend()` past each wave 10, now endless,
+difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Endless dungeon, and a real tombstone.** The Dlvl 5 victory is gone:
+  every wave-10 clear descends again, forever, until you die. Spawn
+  counts grow exponentially only through Dlvl 5 then nearly flat, with
+  deep-level difficulty carried by HP plus one random `LEVEL_MODS` twist
+  per level from Dlvl 6. The tombstone is NetHack's own RIP art drawn as
+  one aligned block (the old one centered each line separately, which is
+  why its walls were ragged), naming what killed you in its own color,
+  your gold, depth and the year, with an epitaph and — answering its own
+  "possessions identified?" question — the consumables you died without
+  using. See `CLAUDE.md` section 4.
 - **Unaffordable menu options are greyed out.** Every cost-gated option
   in the tile-action menu (upgrade, unlock, build — not sell, which has
   no cost) now renders dim grey when you can't currently afford it or
@@ -272,11 +282,10 @@ only) vs. when full browser verification is still warranted.
    7 (hotkeys 1–9 would still fit on the status line if that cap needs to
    move); pick a glyph from unused NetHack object-class punctuation,
    never a letter (see the process note above).
-8. **Endless mode past Dlvl 5.** After the `MAX_DLVL` victory, offer
-   "descend anyway": keep calling `descend()` past the current cap
-   (`won` no longer ends things, or offer it as a post-victory choice)
-   with waves continuing to scale via the existing `dlvlMul`/HP-scale
-   formulas until death; score-chasing pairs well with idea 1.
+8. ~~Endless mode~~ — shipped: the dungeon is now endless by default
+   (see "most recently shipped"). Score-chasing makes idea 1 (bones /
+   high-score file) more valuable than ever — `G.dlvl`, `G.killedBy` and
+   `G.epitaph` are already tracked for it.
 
 ## Polish
 

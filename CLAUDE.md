@@ -406,17 +406,41 @@ The `<script>` is organized top-to-bottom in sections (marked with
    persist across `descend()` and only reset in `resetGame()`.
 
 4. **Game state** — the global `G` object (also `window.G` for tests).
-   `G.state` machine: `title → build ⇄ wave → won | lost`. Waves are
+   `G.state` machine: `title → build ⇄ wave → lost` (no `won` — the
+   dungeon is endless, see below). Waves are
    pre-expanded into `G.spawnQueue` (`{at, t}` sorted by time) by
    `startWave()`.
 
-   **Dungeon levels:** clearing wave 10 doesn't end the game until
-   `G.dlvl >= MAX_DLVL` (5) — below that, `update()`'s wave-clear branch
-   calls `descend()` instead: `G.dlvl++`, a brand new `genLevel()` +
-   `genWaves(G.dlvl)`, towers/creeps cleared (new map, old towers make no
-   sense on it), `G.flow`/`G.flowFly` recomputed, and a small stairwell
-   heal (`+25%` of missing HP) — but gold, score, and the rest of HP
-   carry over. Only at `MAX_DLVL`'s wave 10 does the state become `won`.
+   **Dungeon levels (endless):** every wave-10 clear calls `descend()` —
+   there is no final level and no victory state; a run only ends in
+   death. `descend()`: `G.dlvl++`, a brand new `genLevel()`, then
+   `G.levelMod = pickLevelMod(G.dlvl)` (picked AFTER `genLevel` reseeds
+   `rnd`, so it's deterministic per seed, and BEFORE `genWaves` because
+   `genWaves(dlvl, countMul)` takes its spawn-count multiplier as a
+   parameter — it can't read `G` directly, since the very first
+   `genWaves(1)` call runs at load, before `const G` is declared), then
+   `genWaves`, towers/creeps cleared, `G.flow`/`G.flowFly` recomputed,
+   and a small stairwell heal (`+25%` of missing HP) — gold, score, XP,
+   unlocks, and the rest of HP carry over. **Deep-level scaling:**
+   monster *count* (`genWaves`'s `dlvlMul`) grows exponentially only
+   through Dlvl 5 (the originally tuned range) and nearly flat after
+   (+3%/level) — past 5 the pool stops gaining pricier monsters, so any
+   steeper budget growth turns straight into raw creep count (a scratch
+   test showed ~5000 creeps/level by Dlvl 40 under linear 12% growth).
+   Difficulty past 5 comes from HP instead (`waveHpScale` stays
+   exponential, 1.2^dlvl) plus one random `LEVEL_MODS` twist per level
+   from `ENDLESS_MOD_DLVL` (6) on — swarm/brutes/fleet/hoard/dark, each
+   some mix of `count`/`hp`/`spd`/`bounty` multipliers (`hp` skips the
+   boss) announced in the descend message. Add a twist by appending to
+   `LEVEL_MODS`; every field is optional and defaults to 1.
+   **Death:** `die(killer)` (from the leak branch of `updateCreeps`) sets
+   `lost`, records `G.killedBy` for the tombstone, and picks `G.epitaph`
+   once — `drawLost()` runs every frame, so a `pick()` there would
+   flicker. `drawLost()` draws NetHack's own `RIP` art as one block at a
+   shared left edge (never per-line `drawCentered` — lines of different
+   lengths center differently, which is what made the old stone's walls
+   ragged) and centers the name/gold/killer/depth/year within the
+   stone's 18-column face.
    Abandoned towers aren't a total loss: `descend()` sums
    `Math.floor(t.spent * DESCEND_REFUND_MULT)` (0.4) across `G.towers`
    before clearing them and adds it to `G.gold`, folded into the same
@@ -546,7 +570,7 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `drawLog()`, all built on the shared `overlayBox(x0,y0,w,h,title)`
    helper. Keep every overlay's box within rows 1–20 (rows 22–23 are the
    status bar; row 21 is the last map row — don't let `y0 + h` reach 22 or
-   you'll paint over the status text drawn earlier that frame). Title/won/
+   you'll paint over the status text drawn earlier that frame). Title and
    lost have their own draw functions. Full redraw is cheap; don't add
    dirty-tracking.
 
@@ -668,7 +692,7 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 ```
 
 1. Load the page, check for zero page/console errors, screenshot the
-   title, mid-wave, victory, and tombstone screens and LOOK at them.
+   title, mid-wave, and tombstone screens and LOOK at them.
 2. Sanity-check via `page.evaluate`: building deducts gold, illegal
    placement refused, traps only on corridor/door tiles, selling refunds
    70%. Also check the maze invariant directly: pick a cell adjacent to
@@ -680,12 +704,11 @@ chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
    towers on the highest-value tiles each build phase (e.g. rank by
    proximity to `YATD.getEntrance()`/`getExit()` or just try tiles in
    the rooms — since the route is now dynamic there's no fixed "path
-   coverage" to rank against), start waves, assert final state is `won`.
-   **A full win now means clearing 5 dungeon levels (50 waves total,
-   `MAX_DLVL`), which takes a while even at 4x speed — budget for it, or
-   for a quicker smoke test assert `G.dlvl` reaches 2 (confirms
-   `descend()` fires and the new level is playable) instead of chasing a
-   full win every time.** Because maps and waves are random, run at
+   coverage" to rank against), start waves, and assert how deep the run gets.
+   **There's no win state anymore (the dungeon is endless)** — assert
+   `G.dlvl` reaches some target instead: 2 for a quick smoke test
+   (confirms `descend()` fires and the new level is playable), 5-6 to
+   check the tuned range plus the first random `LEVEL_MODS` level. Because maps and waves are random, run at
    least 3 playthroughs (each `resetGame()` = new dungeon) and require
    all to reach the bar you picked. If every run clears with zero HP
    lost, difficulty is fine or could go up; if any loses, tune down.
