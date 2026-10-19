@@ -596,6 +596,20 @@ The `<script>` is organized top-to-bottom in sections (marked with
    lost have their own draw functions. Full redraw is cheap; don't add
    dirty-tracking.
 
+   **DECgraphics walls (on by default, `g` toggles `G.decGraphics`):**
+   `drawMap()` swaps each `-`/`|` cell for a box-drawing piece chosen by
+   `wallGlyph(x,y)` from which orthogonal neighbors are also wall or door
+   (`WALLISH`; doors count so a line runs right up to its doorway). This
+   is render-only — `map` keeps `-`/`|`, which all placement, pathing and
+   door-carving logic reads, so never write box characters into `map`.
+   `blit()` doesn't draw those pieces as font glyphs: any character in
+   `BOX_EDGES` is stroked as real canvas lines from the cell center to
+   each connected edge (`strokeBox`), because at 12x20 cells a 16px
+   font's box characters stop short of the cell's top and bottom and
+   would leave a gap between every row. To add a piece, add its
+   `[up, down, left, right]` entry to `BOX_EDGES`; `BOX_BY_MASK` is
+   derived from it.
+
 7. **Input — tile-action menu, not a readied-tool model.** Clicking a
    tile (or moving the keyboard cursor and pressing `ENTER`) opens a
    small popup — `G.menu = { x, y }` — listing every action legal on

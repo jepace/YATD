@@ -19,6 +19,11 @@ multiple dungeon levels (`descend()` past each wave 10, now endless,
 difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Box-drawing walls (DECgraphics), on by default.** Walls render as
+  joined line pieces (`┌─┐│└┘├┤┬┴┼`) picked from each wall cell's
+  neighbors at draw time, stroked as real canvas lines so rows join
+  without gaps; `g` toggles back to classic `|`/`-`. Render-only — `map`
+  still holds `|`/`-`. See `CLAUDE.md` section 6.
 - **No more level caps on either side.** Player level and tower enchant
   level are unlimited (`xpForLevel` continues the XP table at 2.3x per
   level; `MAX_LVL = Infinity`; tower range alone stops growing at L6).

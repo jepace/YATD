@@ -107,6 +107,26 @@ function clearBuf() {
     const c = buf[y][x]; c.ch = " "; c.fg = "#4a7a4a"; c.bg = null;
   }
 }
+// box-drawing walls (DECgraphics, see drawMap) are stroked as real lines
+// from the cell's center out to each connected edge, not drawn as font
+// glyphs: at 12x20 cells a 16px font's box characters stop short of the
+// cell's top and bottom, which would leave a gap between every row.
+// Value = which edges the piece reaches: [up, down, left, right].
+const BOX_EDGES = {
+  "─": [0, 0, 1, 1], "│": [1, 1, 0, 0], "┌": [0, 1, 0, 1], "┐": [0, 1, 1, 0],
+  "└": [1, 0, 0, 1], "┘": [1, 0, 1, 0], "├": [1, 1, 0, 1], "┤": [1, 1, 1, 0],
+  "┬": [0, 1, 1, 1], "┴": [1, 0, 1, 1], "┼": [1, 1, 1, 1],
+};
+function strokeBox(x, y, edges, fg) {
+  const cx = x * CW + CW / 2, cy = y * CH + CH / 2;
+  ctx.strokeStyle = fg; ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (edges[0]) { ctx.moveTo(cx, cy); ctx.lineTo(cx, y * CH); }
+  if (edges[1]) { ctx.moveTo(cx, cy); ctx.lineTo(cx, y * CH + CH); }
+  if (edges[2]) { ctx.moveTo(cx, cy); ctx.lineTo(x * CW, cy); }
+  if (edges[3]) { ctx.moveTo(cx, cy); ctx.lineTo(x * CW + CW, cy); }
+  ctx.stroke();
+}
 function blit() {
   ctx.fillStyle = "#030503";
   ctx.fillRect(0, 0, COLS * CW, ROWS * CH);
@@ -116,7 +136,9 @@ function blit() {
       ctx.fillStyle = c.bg;
       ctx.fillRect(x * CW, y * CH, CW, CH);
     }
-    if (c.ch !== " ") {
+    const edges = BOX_EDGES[c.ch];
+    if (edges) strokeBox(x, y, edges, c.fg);
+    else if (c.ch !== " ") {
       ctx.fillStyle = c.fg;
       ctx.fillText(c.ch, x * CW + CW / 2, y * CH + CH / 2 + 1);
     }
@@ -762,7 +784,7 @@ const G = {
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
   inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
-  levelMod: null, killedBy: null, epitaph: "",
+  levelMod: null, killedBy: null, epitaph: "", decGraphics: true,
   unlocked: { 1: true, 6: true },      // tower types permanently bought with unlockTower()
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
@@ -1597,10 +1619,25 @@ function update(dt) {
 }
 
 /* ---------- rendering ---------- */
+// NetHack's DECgraphics option: walls render as joined box-drawing lines
+// instead of | and -. Purely cosmetic -- `map` itself keeps | and - (all
+// placement/pathing/door logic reads those), the piece is chosen here at
+// draw time from which orthogonal neighbors are also wall or door (doors
+// count so a wall's line runs right up to its doorway). `g` toggles it.
+const WALLISH = (x, y) => { const g = map[y] && map[y][x]; return g === "-" || g === "|" || g === "+"; };
+const BOX_BY_MASK = {}; // "udlr" bitmask -> box character
+for (const [ch, e] of Object.entries(BOX_EDGES)) BOX_BY_MASK[e.join("")] = ch;
+function wallGlyph(x, y, g) {
+  const key = [WALLISH(x, y - 1), WALLISH(x, y + 1), WALLISH(x - 1, y), WALLISH(x + 1, y)]
+    .map(b => b ? 1 : 0).join("");
+  return BOX_BY_MASK[key] || (key === "1000" || key === "0100" ? "│" : key === "0010" || key === "0001" ? "─" : g);
+}
 function drawMap() {
   for (let y = 0; y < MAPH; y++) for (let x = 0; x < MAPW; x++) {
     const g = map[y][x];
-    if (g !== " ") put(x, MAPY + y, g, TERRAIN_COLOR[g]);
+    if (g === " ") continue;
+    const ch = G.decGraphics && (g === "-" || g === "|") ? wallGlyph(x, y, g) : g;
+    put(x, MAPY + y, ch, TERRAIN_COLOR[g]);
   }
 }
 function drawRange(cx, cy, range, tint) {
@@ -1810,7 +1847,7 @@ function drawHelp() {
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",
     "ITEMS: r fire  q haste  z cold  c charge  i inv",
-    "KEYS: SPACE wave/pause  a auto  Ctrl-P log  R restart",
+    "KEYS: SPACE wave/pause  a auto  g walls  ^P log  R restart",
     "      hjkl/arrows+ENTER cursor  + - speed",
     "",
     "~30 monsters, phasing in/out by dungeon level. Some fly,",
@@ -2110,6 +2147,8 @@ window.addEventListener("keydown", (e) => {
         message(G.paused ? "Time stands still.  (SPACE to resume)" : "Time flows once more.");
       }
       return;
+    case "g": G.decGraphics = !G.decGraphics;
+      message("DECgraphics " + (G.decGraphics ? "on: box-drawing walls." : "off: classic | and - walls.")); return;
     case "a": G.autoStart = !G.autoStart;
       message("Auto-start waves: " + (G.autoStart ? "on" : "off")); return;
     case "+": case "=": G.speed = Math.min(4, G.speed * 2);

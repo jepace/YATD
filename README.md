@@ -236,6 +236,7 @@ while deciding what to build.
   the spot instead of closing the menu and pressing the hotkey again.
 - `Ctrl-P` message log (like NetHack's `^P`) · `?` help · `Escape` closes
   whatever overlay or menu is open
+- `g` toggles box-drawing walls (NetHack's DECgraphics) vs. classic `|` and `-`
 - `a` auto-start waves · `+`/`-` game speed · `R` restart
 
 Good luck. The dungeon is counting on you.
