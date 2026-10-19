@@ -775,6 +775,50 @@ function genWaves(dlvl, countMul) {
     WAVES.push(groups);
   }
 }
+// Wave foresight: during the build phase, row 23 carries a flavor hint
+// about the next wave's biggest group (by count), keyed by monster CLASS
+// glyph so same-letter tiers share a sound.  Before wave 10 it names
+// this level's dragon and what it shrugs off instead.  Computed once on
+// entering the build phase (setForesight) -- pick() in a draw function
+// would flicker and burn seeded rnd() calls every frame.
+const FORESIGHT = {
+  r: ["You hear scratching inside the walls.", "Something squeaks in the dark."],
+  x: ["You hear a faint electric buzzing.", "Something crackles along the floor."],
+  a: ["You hear the patter of many tiny feet.", "The floor seems to crawl."],
+  d: ["You hear the howling of {n}s.", "You hear distant barking."],
+  b: ["You hear the flutter of leathery wings.", "Something shrieks overhead."],
+  k: ["You hear yapping and the clatter of crude weapons."],
+  ";": ["You hear water splashing somewhere below.", "You smell brine."],
+  o: ["You hear the tramp of iron-shod boots.", "You hear orcish war chants."],
+  G: ["You hear the tapping of tiny picks.", "Someone small is whistling."],
+  h: ["You hear muttering about gold.", "You hear digging."],
+  F: ["You smell mildew.", "Something soft squelches."],
+  s: ["You hear a dry rustling of legs.", "Webs tremble in the dark."],
+  "&": ["You smell brimstone.", "You hear distant cackling."],
+  Z: ["You smell rotting flesh.", "You hear shuffling and moaning."],
+  T: ["You hear heavy footfalls and wet regrowing sounds.", "Something big grunts."],
+  O: ["The floor shakes with heavy steps.", "You hear a bellow."],
+  W: ["You feel a chill.", "You hear a hollow whisper."],
+  e: ["You feel a wave of heat.", "You smell smoke."],
+  L: ["You feel the cold touch of necromancy.", "Something ancient stirs."],
+};
+const IMMUNE_NAME = { fire: "fire", cold: "frost", acid: "acid", electric: "lightning" };
+function setForesight() {
+  const groups = WAVES[G.wave];
+  if (!groups) { G.foresight = ""; return; }
+  let s;
+  if (groups.some(g => g.t === "D")) {
+    const d = MONSTERS.D;
+    s = "You smell a " + d.name + "!" +
+        (d.immuneTo ? "  Its scales shrug off " + IMMUNE_NAME[d.immuneTo] + "." : "");
+  } else {
+    const big = groups.reduce((a, b) => (b.n > a.n ? b : a));
+    const m = MONSTERS[big.t];
+    s = pick(FORESIGHT[m.ch] || ["You hear distant footsteps."]).replace("{n}", m.name);
+  }
+  G.foresight = s;
+  G.log.push(s);   // keep it in ^P history without displacing G.msg
+}
 const waveHpScale = (w, dlvl) =>
   (1 + 0.22 * (w - 1)) * Math.pow(1.2, (dlvl || 1) - 1);
 // true if a submerging monster is currently underwater and safe from
@@ -880,6 +924,7 @@ function resetGame() {
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message(ALTARS.length ? "You enter the Dungeons of Doom.  An altar stands here.  Press SPACE."
                         : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+  setForesight();
 }
 
 // clearing wave 10 on a level below MAX_DLVL brings a fresh dungeon and
@@ -907,6 +952,7 @@ function descend() {
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
   G.state = "build";
+  setForesight();
   const refundMsg = refund ? "  Your abandoned towers dissolve into (+" + refund + " zorkmids)." : "";
   message((G.levelMod
     ? "You descend to Dlvl " + G.dlvl + ".  " + G.levelMod.msg
@@ -1679,6 +1725,7 @@ function update(dt) {
       if (G.autoStart) startWave();
     } else {
       G.state = "build";
+      setForesight();
       message(pick([
         "The dungeon falls silent.  Wave bonus: " + bonus + " zorkmids.",
         "The last echoes fade.  Wave bonus: " + bonus + " zorkmids.",
@@ -1796,6 +1843,8 @@ function drawGame() {
     ? (G.paused ? "SPACE:resume" : "SPACE:pause")
     : "SPACE:start wave";
   let l2 = "Click a tile for options   " + spaceHint + "   i:inv  ?:help";
+  // build phase: the next wave's foresight hint replaces the generic one
+  if (G.state === "build" && G.foresight) l2 = G.foresight + "   " + spaceHint;
   // hovered monster info takes priority over the generic hint
   if (hy >= 0 && hy < MAPH) {
     const c = G.creeps.find(c => {

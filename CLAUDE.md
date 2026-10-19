@@ -321,6 +321,18 @@ The `<script>` is organized top-to-bottom in sections (marked with
    default to giving it 2–3 variants via `pick()` rather than one fixed
    string, consistent with the existing ones.
 
+   **Wave foresight:** `setForesight()` (called wherever the build phase
+   begins: end of `resetGame()`, `descend()`, and the wave-clear branch of
+   `update()`) stores one hint in `G.foresight` about `WAVES[G.wave]` (the
+   NEXT wave): a `FORESIGHT[ch]` flavor line for its largest group, keyed
+   by class glyph, or, before wave 10, the dragon's color and immunity.
+   During the build phase, row 23 shows it in place of the generic hint.
+   It is computed once and never inside a draw function, because `pick()`
+   would flicker and consume seeded `rnd()` every frame. It also goes into
+   `G.log` (but not through `message()`, so it never overwrites `G.msg`).
+   A new monster glyph should get a `FORESIGHT` entry; otherwise it falls
+   back to "distant footsteps".
+
    **Elemental damage & dragon immunity:** `damageCreep(c, dmg, dtype)`'s
    third argument is one of `"fire"|"acid"|"electric"|"cold"` (or omitted
    for untyped/physical, which always lands); if `dtype` matches the

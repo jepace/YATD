@@ -143,6 +143,11 @@ a while. Routing monsters past the altar with your maze is the trick.
 
 ## Monsters
 
+Between waves, the bottom line tells you what you hear coming ("You hear
+the howling of wolves", "You smell brimstone"), so you can build for the
+next wave. Before wave 10 it names the dragon's color and what it's
+immune to.
+
 Around 30 monster types, in tiers that phase in and out with dungeon
 depth — a grid bug that harasses you on Dlvl 1 is long gone by Dlvl 3,
 and things like the troll chieftain or kraken don't show up before Dlvl
