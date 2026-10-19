@@ -177,6 +177,9 @@ const pathIdx = new Map(); // "x,y" -> index along path (generation only)
 let ENTRANCE = [0, 0], EXIT = [0, 0];   // the '<' and '>' cells
 let ALTARS = [];                        // [x,y] of this level's altar, if any (see offerSacrifice)
 const ALTAR_CHANCE = 0.2, ALTAR_BOON_CHANCE = 0.2, ALTAR_COOLDOWN = 30;
+// a rare shopkeeper '@' (see placeShop / shopBuy): {x, y, stock: {item: n}}
+let SHOP = null;
+const SHOP_CHANCE = 0.15;
 
 // serpentine waypoints: x-columns strictly increase, so no self-crossing
 function genPath() {
@@ -339,9 +342,26 @@ function genLevel() {
     if (buildLevel() >= 60 && path.length >= 135) break;
   }
   placeAltar();
+  placeShop();
 }
 // after the level is final: maybe one altar on room floor, off the
 // generator's seed path and not right beside either staircase
+// same rules as the altar, rarer: a shopkeeper standing on room floor
+// with a small, random, finite stock of consumables (nothing is in
+// endless supply).  The cell stays walkable -- monsters shove past the
+// shopkeeper -- so it can never seal the route.
+function placeShop() {
+  SHOP = null;
+  if (rnd() >= SHOP_CHANCE) return;
+  for (let guard = 0; guard < 300; guard++) {
+    const x = ri(1, 78), y = ri(1, 19);
+    if (map[y][x] !== "." || onPath(x, y)) continue;
+    if (Math.hypot(x - ENTRANCE[0], y - ENTRANCE[1]) < 4 || Math.hypot(x - EXIT[0], y - EXIT[1]) < 4) continue;
+    const stock = { scroll: ri(0, 2), potion: ri(0, 2), wand: ri(0, 1), charge: ri(0, 1) };
+    if (!Object.values(stock).some(n => n)) stock.potion = 1;
+    map[y][x] = "@"; SHOP = { x, y, stock }; return;
+  }
+}
 function placeAltar() {
   ALTARS = [];
   if (rnd() >= ALTAR_CHANCE) return;
@@ -376,7 +396,7 @@ const onPath = (x, y) => pathIdx.has(x + "," + y);
 // extra obstacles out of this at runtime (see computeFlow below).
 const terrainWalkable = (x, y) => {
   const g = map[y] && map[y][x];
-  return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{" || g === "_";
+  return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{" || g === "_" || g === "@";
 };
 // true if a live ground creep is DRAWN on (x,y) -- i.e. what you see is
 // what blocks. A creep's true cell (c.x,c.y) and the cell it's stepping
@@ -458,7 +478,7 @@ function wouldSealPath(x, y) {
 
 const TERRAIN_COLOR = {
   "-": "#9aa88a", "|": "#9aa88a", ".": "#3d6b3d", "#": "#6e6e5c",
-  "+": "#c8a832", "<": "#e8e8d8", ">": "#e8e8d8", "{": "#4aa8ff", "_": "#d8c8f8", " ": "#000",
+  "+": "#c8a832", "<": "#e8e8d8", ">": "#e8e8d8", "{": "#4aa8ff", "_": "#d8c8f8", "@": "#f0f0f0", " ": "#000",
 };
 
 /* ---------- data tables ---------- */
@@ -929,8 +949,8 @@ function resetGame() {
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
-  message(ALTARS.length ? "You enter the Dungeons of Doom.  An altar stands here.  Press SPACE."
-                        : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+  message(ALTARS.length || SHOP ? "You enter the Dungeons of Doom." + levelNotes() + "  Press SPACE."
+                                : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
   loadBones();
   setForesight();
 }
@@ -969,7 +989,12 @@ function descend() {
       "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
       "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
       "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
-    ])) + (ALTARS.length ? "  An altar stands here." : "") + refundMsg);
+    ])) + levelNotes() + refundMsg);
+}
+// arrival flavor for this level's rare features
+function levelNotes() {
+  return (ALTARS.length ? "  An altar stands here." : "") +
+         (SHOP ? "  You hear someone cursing shoplifters." : "");
 }
 
 // ends the run -- records what did it (for the tombstone) and picks the
@@ -1217,7 +1242,35 @@ const CHARGE_REGEN = 0.4;   // charges/sec -- ~1 every 2.5s while below max
 // call (never cached) so it always reflects current gold/tower/creep
 // state -- the menu is a live view of "what can I do here right now",
 // not a snapshot from when it was opened.
+const SHOP_ITEMS = {
+  scroll: { name: "scroll of fireball", price: 35 },
+  potion: { name: "potion of haste",    price: 20 },
+  wand:   { name: "wand of cold",       price: 25 },
+  charge: { name: "wand of charging",   price: 30 },
+};
+// shop prices scale with depth like tower prices do
+const shopPrice = (k) => Math.round(SHOP_ITEMS[k].price * Math.pow(1.18, G.dlvl - 1));
+function shopBuy(k) {
+  const price = shopPrice(k), it = SHOP_ITEMS[k];
+  if (!SHOP || SHOP.stock[k] <= 0) { message("\"Sorry, I'm all out of those.\""); return; }
+  if (G.gold < price) { message("\"That " + it.name + " is " + price + " zorkmids.  No credit!\""); return; }
+  G.gold -= price; SHOP.stock[k]--; G.inv[k]++;
+  sfx("build");
+  message(pick([
+    "You bought a " + it.name + " for " + price + " zorkmids.  \"Thank you for shopping!\"",
+    "\"For you, good Keeper, only " + price + " zorkmids.\"  You get a " + it.name + ".",
+    "The shopkeeper hands you a " + it.name + ".  \"Come again!\" (-" + price + " zorkmids)",
+  ]));
+}
 function menuOptions(x, y) {
+  if (SHOP && x === SHOP.x && y === SHOP.y && !towerAt(x, y)) {
+    const opts = Object.keys(SHOP_ITEMS).filter(k => SHOP.stock[k] > 0).map((k, i) => ({
+      key: String(i + 1),
+      label: "Buy " + SHOP_ITEMS[k].name + " ($" + shopPrice(k) + ", " + SHOP.stock[k] + " left)",
+      action: () => shopBuy(k), keepOpen: true, disabled: G.gold < shopPrice(k),
+    }));
+    return { opts };
+  }
   const t = towerAt(x, y);
   if (t) {
     const opts = [];
@@ -1990,7 +2043,7 @@ function drawMenu() {
   const { tower, opts, headerLines } = menuLayout(x, y);
   const { bx0, by0, w, h } = menuBox(x, y, Math.max(opts.length, 1) + headerLines);
   const title = tower ? TOWERS[tower.type].ch + " " + TOWERS[tower.type].name + " L" + tower.lvl
-                       : "Build here";
+                       : map[y][x] === "@" ? "@ Shopkeeper" : "Build here";
   overlayBox(bx0, by0, w, h, title);
   let row = by0 + 2;
   if (tower) {
@@ -2007,7 +2060,8 @@ function drawMenu() {
     row++;
   }
   if (!opts.length) {
-    text(bx0 + 2, row, map[y][x] === "_" ? "Altar: slay monsters beside it." : "Nothing can be built here.", "#8a8a6a");
+    text(bx0 + 2, row, map[y][x] === "_" ? "Altar: slay monsters beside it."
+      : map[y][x] === "@" ? "\"Sold out!  Try the next level.\"" : "Nothing can be built here.", "#8a8a6a");
   } else {
     opts.forEach((o, i) => text(bx0 + 2, row + i, "[" + o.key + "] " + o.label,
       o.disabled ? "#5a5a4a" : "#c8e8b8"));

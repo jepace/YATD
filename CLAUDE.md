@@ -410,6 +410,17 @@ The `<script>` is organized top-to-bottom in sections (marked with
    the altar section's declarations would exist. Steering monsters past
    an altar with your maze is the intended play.
 
+   **Shops (`@`, rarer than altars):** `placeShop()` runs right after
+   `placeAltar()` with `SHOP_CHANCE` (0.15) and the same placement rules,
+   recording the module-level `SHOP = {x, y, stock}`. Stock is a few
+   random consumables (0–2 scrolls or potions, 0–1 of each wand, never
+   empty) and doesn't restock. The cell is walkable, so it can't seal the
+   route. `menuOptions()` checks the shop tile first and offers one
+   `keepOpen` buy option per item in stock; `shopBuy(k)` charges
+   `shopPrice(k)`, which scales 1.18x per Dlvl like `towerCost`.
+   `levelNotes()` builds the altar and shop arrival flavor used by both
+   `resetGame()` and `descend()`.
+
    **Monster lore popup:** clicking a live creep (when the tile has no
    tower — a tower's own upgrade/sell menu takes priority, e.g. a flying
    creep sharing a tower's cell) opens `G.lore` (a monster type key) via

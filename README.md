@@ -57,6 +57,9 @@ in a 4.5-tile radius for 4s; the wand of charging restores every tower
 within a 3-tile radius. Nothing in this game is a blanket, map-wide
 effect — you always have to commit to a spot.
 
+Rarely a level has a shopkeeper (`@`). Click them to buy a few
+consumables with gold. Stock is small and random, and it doesn't restock.
+
 ## Towers
 
 Tower glyphs are always NetHack object-class punctuation, never a
