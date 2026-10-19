@@ -1065,10 +1065,12 @@ let HISCORES = loadJSON("yatd.scores", []);   // top 10, best first; cached so d
 // slipped into one of waves 4-9 (and a foresight warning the wave
 // before).  Kill it and you inherit the items; let it leak and they're
 // gone.  Bones are consumed on arrival either way -- one haunting each.
+const BONES_SAVE_CHANCE = 0.33, BONES_LOAD_CHANCE = 0.33;   // ~1 in 9 at most
 function loadBones() {
   G.bones = null;
   const b = loadJSON("yatd.bones", null);
-  if (!b || b.dlvl !== G.dlvl) return;
+  // even matching bones only haunt some visits; unused bones wait for a later run
+  if (!b || b.dlvl !== G.dlvl || rnd() >= BONES_LOAD_CHANCE) return;
   saveJSON("yatd.bones", null);
   G.bones = b;
   WAVES[ri(3, 8)].push({ t: "ghost", n: 1, gap: 1 });
@@ -1084,7 +1086,8 @@ function die(killer) {
   G.scoreRank = HISCORES.indexOf(entry) + 1;   // 0 if it didn't make the list
   saveJSON("yatd.scores", HISCORES);
   // like NetHack, no bones on Dlvl 1 -- every early death would haunt the very next game
-  if (G.dlvl >= 2) saveJSON("yatd.bones", { dlvl: G.dlvl, inv: Object.assign({}, G.inv) });
+  // and only some deaths leave bones at all (NetHack's are rare too)
+  if (G.dlvl >= 2 && rnd() < BONES_SAVE_CHANCE) saveJSON("yatd.bones", { dlvl: G.dlvl, inv: Object.assign({}, G.inv) });
   G.killedBy = { name: killer.name, fg: killer.fg, boss: !!killer.boss };
   G.epitaph = pick([
     "The stairs were not held.",

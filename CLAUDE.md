@@ -526,7 +526,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
    `HISCORES` (top 10, cached in a module-level `let` so `drawTitle()`
    doesn't read storage every frame; title shows the top 3, the tombstone
    shows your rank via `G.scoreRank`) and, from Dlvl 2 down, saves
-   `yatd.bones = {dlvl, inv}`. `loadBones()` (called before
+   `yatd.bones = {dlvl, inv}` on only `BONES_SAVE_CHANCE` (1/3) of deaths;
+   arrival loads it only `BONES_LOAD_CHANCE` (1/3) of the time, leaving it
+   stored for a later visit otherwise. `loadBones()` (called before
    `setForesight()` in both `resetGame()` and `descend()`) consumes
    matching bones on arrival: it slips one `ghost` (a `MONSTERS` entry
    that is never in `genWaves`' pool) into a random wave from 4 to 9.
