@@ -495,6 +495,17 @@ The `<script>` is organized top-to-bottom in sections (marked with
    lengths center differently, which is what made the old stone's walls
    ragged) and centers the name/gold/killer/depth/year within the
    stone's 18-column face.
+   **High scores & bones (`localStorage`):** `die()` also pushes onto
+   `HISCORES` (top 10, cached in a module-level `let` so `drawTitle()`
+   doesn't read storage every frame; title shows the top 3, the tombstone
+   shows your rank via `G.scoreRank`) and, from Dlvl 2 down, saves
+   `yatd.bones = {dlvl, inv}`. `loadBones()` (called before
+   `setForesight()` in both `resetGame()` and `descend()`) consumes
+   matching bones on arrival: it slips one `ghost` (a `MONSTERS` entry
+   that is never in `genWaves`' pool) into a random wave from 4 to 9.
+   `setForesight` warns one wave ahead, and the kill branch hands over
+   `G.bones.inv`. All storage access goes through `loadJSON`/`saveJSON`,
+   which swallow errors, so the game is unchanged without storage.
    Abandoned towers aren't a total loss: `descend()` sums
    `Math.floor(t.spent * DESCEND_REFUND_MULT)` (0.4) across `G.towers`
    before clearing them and adds it to `G.gold`, folded into the same

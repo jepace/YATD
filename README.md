@@ -209,6 +209,13 @@ keep more than one type of tower in rotation. The Archer's plain bolts
 are untyped and always land regardless of color, which is exactly why
 it's worth keeping around even once you've unlocked fancier towers.
 
+## High scores and bones
+
+Your best ten runs are kept in the browser, and the title screen shows
+the top three. Die on Dlvl 2 or deeper and you leave bones: the next run
+that reaches that level meets your ghost partway through, holding the
+consumables you never used. Kill it to get them back.
+
 ## Controls
 
 Bindings follow NetHack conventions wherever one exists. There's no

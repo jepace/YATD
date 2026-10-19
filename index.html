@@ -642,6 +642,10 @@ const MONSTERS = {
               lore: "An ogre, brutish and strong, more than happy to smash straight through your defenses." },
   wraith:   { name: "wraith",        ch: "W", hp: 95,  spd: 2.0, bounty: 12, leak: 2, fg: "#c8c8e8", flies: true,
               lore: "A wraith drifts through solid matter as easily as smoke -- your maze means nothing to it." },
+  // never in genWaves' pool: only placed by loadBones() when a previous
+  // run died on this Dlvl, carrying that run's unused consumables
+  ghost:    { name: "ghost",         ch: "W", hp: 80,  spd: 1.3, bounty: 15, leak: 4, fg: "#e8e8f0", flies: true,
+              lore: "The restless shade of a Keeper who fell on this very level.  It still clutches whatever it died carrying -- lay it to rest and those things are yours again." },
   gspider:  { name: "giant spider",  ch: "s", hp: 60,  spd: 3.2, bounty: 10, leak: 2, fg: "#582888",
               lore: "A larger, meaner cousin of the giant spider, no less quick underfoot." },
   warg:     { name: "warg",          ch: "d", hp: 90,  spd: 3.6, bounty: 14, leak: 3, fg: "#485868",
@@ -807,7 +811,9 @@ function setForesight() {
   const groups = WAVES[G.wave];
   if (!groups) { G.foresight = ""; return; }
   let s;
-  if (groups.some(g => g.t === "D")) {
+  if (groups.some(g => g.t === "ghost")) {
+    s = "You feel a chill.  Something you once were is waiting.";
+  } else if (groups.some(g => g.t === "D")) {
     const d = MONSTERS.D;
     s = "You smell a " + d.name + "!" +
         (d.immuneTo ? "  Its scales shrug off " + IMMUNE_NAME[d.immuneTo] + "." : "");
@@ -924,6 +930,7 @@ function resetGame() {
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message(ALTARS.length ? "You enter the Dungeons of Doom.  An altar stands here.  Press SPACE."
                         : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+  loadBones();
   setForesight();
 }
 
@@ -952,6 +959,7 @@ function descend() {
   G.flow = computeFlow();
   G.flowFly = computeFlow(null, true);
   G.state = "build";
+  loadBones();
   setForesight();
   const refundMsg = refund ? "  Your abandoned towers dissolve into (+" + refund + " zorkmids)." : "";
   message((G.levelMod
@@ -966,8 +974,40 @@ function descend() {
 // ends the run -- records what did it (for the tombstone) and picks the
 // epitaph ONCE here, since drawLost() runs every frame and a pick()
 // there would flicker through all of them
+// High scores and bones live in localStorage, which can be missing or
+// throw (private windows, file:// in some browsers) -- every access is
+// wrapped, and the game plays the same without them.
+function loadJSON(k, def) {
+  try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; }
+}
+function saveJSON(k, v) {
+  try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+}
+let HISCORES = loadJSON("yatd.scores", []);   // top 10, best first; cached so drawTitle doesn't hit storage every frame
+// Bones, NetHack-style: dying leaves your ghost on that Dlvl, holding your
+// unused consumables.  A later run that reaches that Dlvl gets the ghost
+// slipped into one of waves 4-9 (and a foresight warning the wave
+// before).  Kill it and you inherit the items; let it leak and they're
+// gone.  Bones are consumed on arrival either way -- one haunting each.
+function loadBones() {
+  G.bones = null;
+  const b = loadJSON("yatd.bones", null);
+  if (!b || b.dlvl !== G.dlvl) return;
+  saveJSON("yatd.bones", null);
+  G.bones = b;
+  WAVES[ri(3, 8)].push({ t: "ghost", n: 1, gap: 1 });
+}
 function die(killer) {
   G.state = "lost";
+  const entry = { score: G.score, dlvl: G.dlvl, wave: G.wave, killer: killer.name,
+                  date: new Date().toISOString().slice(0, 10) };
+  HISCORES.push(entry);
+  HISCORES.sort((a, b) => b.score - a.score);
+  HISCORES = HISCORES.slice(0, 10);
+  G.scoreRank = HISCORES.indexOf(entry) + 1;   // 0 if it didn't make the list
+  saveJSON("yatd.scores", HISCORES);
+  // like NetHack, no bones on Dlvl 1 -- every early death would haunt the very next game
+  if (G.dlvl >= 2) saveJSON("yatd.bones", { dlvl: G.dlvl, inv: Object.assign({}, G.inv) });
   G.killedBy = { name: killer.name, fg: killer.fg, boss: !!killer.boss };
   G.epitaph = pick([
     "The stairs were not held.",
@@ -1269,6 +1309,13 @@ function damageCreep(c, dmg, dtype) {
     ]));
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
+    if (c.type === "ghost" && G.bones) {
+      const got = Object.keys(G.bones.inv).filter(k => G.bones.inv[k] > 0 && k in G.inv);
+      for (const k of got) G.inv[k] += G.bones.inv[k];
+      message(got.length ? "The ghost fades.  You recover your old possessions!"
+                         : "The ghost fades, at peace.  It was carrying nothing.");
+      G.bones = null;
+    }
     offerSacrifice(cx, cy);
     gainXp(bounty); // called last so a level-up's --More-- message wins over the kill message
   }
@@ -2043,8 +2090,14 @@ function drawTitle() {
   ], 4, "#50ff96");
   drawCentered(["Y e t   A n o t h e r   T o w e r   D e f e n s e"], 11, "#c8e8b8");
   drawCentered(["a NetHack-flavored dungeon defense"], 13, "#6a8a6a");
+  if (HISCORES.length) {
+    drawCentered(["Top Keepers"], 15, "#8aa87a");
+    drawCentered(HISCORES.slice(0, 3).map((h, i) =>
+      (i + 1) + ". " + String(h.score).padStart(7) + "  Dlvl " + String(h.dlvl).padEnd(3) +
+      " killed by " + (h.killer.length > 20 ? h.killer.slice(0, 20) : h.killer.padEnd(20))), 16, "#6a8a6a");
+  }
   if (Math.floor(G.time * 1.5) % 2 === 0)
-    drawCentered(["-- press any key to descend --"], 17, "#e8e850");
+    drawCentered(["-- press any key to descend --"], 19, "#e8e850");
   drawCentered(["dungeon seed " + SEED + "  |  every game is a new dungeon"], 20, "#3a5a3a");
 }
 // NetHack's own tombstone (the "rip" art from its topten.c), drawn as ONE
@@ -2095,6 +2148,8 @@ function drawLost() {
   drawCentered(['"' + (G.epitaph || "The stairs were not held.") + '"'], 17, "#8aa87a");
   drawCentered(["Score " + G.score + "   Kills " + G.kills + "   Player Lv " + G.plevel +
     "   Deepest: Dlvl " + G.dlvl], 18, "#c8d8b8");
+  if (G.scoreRank) drawCentered([G.scoreRank === 1 ? "A new high score!  You top the list of Keepers."
+    : "You placed #" + G.scoreRank + " among the Keepers."], 19, "#e8e850");
   drawCentered(["Do you want your possessions identified? [ynq] y"], 20, "#c8d8b8");
   const inv = [
     [G.inv.scroll, "scroll of fireball", "scrolls of fireball"],
