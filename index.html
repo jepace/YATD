@@ -663,8 +663,8 @@ const MONSTERS = {
   kraken:   { name: "kraken",        ch: ";", hp: 220, spd: 1.8, bounty: 35, leak: 4, fg: "#2868a8",
               submerges: true, immuneTo: "electric",
               lore: "A kraken, the eel's monstrous elder -- submerges at will, and lightning slides right off it." },
-  lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2,
-              lore: "A lich, an undead spellcaster clinging to unlife -- far tougher than it looks." },
+  lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2, aura: 3,
+              lore: "A lich, an undead spellcaster clinging to unlife -- far tougher than it looks.  Its dark chanting quickens every monster around it." },
 
   // dragon's name/fg/immuneTo are overwritten by pickDragon() at the start
   // of every level -- see DRAGON_COLORS. There's only ever one dragon
@@ -1630,8 +1630,13 @@ function updateTowers(dt) {
   }
 }
 
+// `aura: r` (the lich) hastes every OTHER live monster within r cells by
+// AURA_HASTE -- kill the caster first and the whole pack slows back down
+const AURA_HASTE = 1.3;
+const hastened = (c, auras) => auras.some(a => a !== c && Math.hypot(a.x - c.x, a.y - c.y) <= trait(a, "aura"));
 function updateCreeps(dt) {
   const [ex, ey] = EXIT;
+  const auras = G.creeps.filter(c => !c.dead && trait(c, "aura"));
   for (const c of G.creeps) {
     if (c.dead) continue;
     const m = MONSTERS[c.type];
@@ -1641,6 +1646,7 @@ function updateCreeps(dt) {
     c.hitFlash = Math.max(0, c.hitFlash - dt);
     let spd = c.spd;
     if (G.time < c.slowUntil) spd *= c.slowFactor;
+    if (auras.length && hastened(c, auras)) spd *= AURA_HASTE;
     c.t += spd * dt;
     // consume whole-cell steps; a while loop lets fast creeps or high
     // game speed cross several cells in one update without stalling
@@ -1899,6 +1905,7 @@ function drawGame() {
     });
     if (c) l2 = "You see: " + creepName(c) + "  HP:" +
       Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "") +
+      (hastened(c, G.creeps.filter(a => !a.dead && trait(a, "aura"))) ? " (hastened)" : "") +
       "   (click for lore)";
   }
   text(0, 23, l2.padEnd(COLS).slice(0, COLS), "#8aa87a");
@@ -1935,6 +1942,7 @@ function drawLore() {
   const flags = [];
   if (m.flies) flags.push("flies");
   if (m.submerges) flags.push("submerges");
+  if (m.aura) flags.push("hastes nearby monsters");
   if (m.splits) flags.push("splits");
   if (m.siege) flags.push("smashes towers");
   if (m.disarms) flags.push("disarms traps");

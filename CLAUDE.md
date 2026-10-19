@@ -158,7 +158,10 @@ The `<script>` is organized top-to-bottom in sections (marked with
    which intentionally ignores submersion — if you add a new AoE/instant-hit
    effect, decide deliberately whether it should respect submersion and
    say so in a comment, since it's easy to forget one of the four
-   existing filter sites when adding a fifth. Every monster passively
+   existing filter sites when adding a fifth. `aura: r` (the lich) hastes every other live
+   creep within `r` cells by `AURA_HASTE` (1.3x) in `updateCreeps`, read
+   through `trait()` and checked against true cells, so killing the
+   caster slows the whole pack again. Every monster passively
    heals `BASE_REGEN` (0.4) hp/sec in `updateCreeps` whenever below max
    HP, whether or not it's currently being shot at — `regen` (only the
    troll sets it, at 3) overrides the baseline for a monster that should
