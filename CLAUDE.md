@@ -391,15 +391,21 @@ The `<script>` is organized top-to-bottom in sections (marked with
    *this* level's dragon color, not a stale one from a previous descent.
 
    **Player level gates tower enchantment**, independent of gold:
-   `G.plevel` (1–6) is computed from cumulative kill XP
+   `G.plevel` (1 and up, no cap) is computed from cumulative kill XP
    (`PLAYER_XP_THRESHOLDS`, `playerLevelForXp()`) via `gainXp()`, called
    from `damageCreep()`'s kill branch with `m.bounty` as the XP amount —
    deliberately called *last* in that branch (after the kill/boss
    message) so a level-up's own `--More--` message wins over the kill
    message rather than being immediately overwritten by it.
    `playerMaxTowerLvl()` (`Math.min(MAX_LVL, G.plevel)`) is the real cap
-   `upgradeTower()` enforces; `MAX_LVL` itself never changes and is still
-   the absolute ceiling once `G.plevel` catches up to it. A player level
+   `upgradeTower()` enforces. **Neither has a ceiling anymore** (the
+   dungeon is endless): `MAX_LVL` is `Infinity`, and `xpForLevel(L)`
+   uses the hand-tuned `PLAYER_XP_THRESHOLDS` table for levels 1–6, then
+   continues it at 2.3x per level forever. Tower damage/charges/HP
+   already scale as `Math.pow(_, t.lvl-1)` with no cap needed; range is
+   the exception — capped at `RANGE_CAP_LVL` (6) in `towerRange()`, since
+   +0.5/level forever would eventually mean one tower covering the whole
+   map. A player level
    1 game can't enchant ANY tower past L1 even sitting on a full
    treasury — gold buys towers, XP (from actually fighting) buys the
    right to improve them. Like `G.gold`/`G.score`, `G.xp`/`G.plevel`
@@ -433,6 +439,22 @@ The `<script>` is organized top-to-bottom in sections (marked with
    some mix of `count`/`hp`/`spd`/`bounty` multipliers (`hp` skips the
    boss) announced in the descend message. Add a twist by appending to
    `LEVEL_MODS`; every field is optional and defaults to 1.
+   Past Dlvl 5 bounty (and so XP) grows 1.1x/level in `damageCreep`, so
+   income keeps rough pace with tower prices (1.18x) while staying behind
+   monster HP (1.2x) — the player's curve deliberately trails the
+   dungeon's so every run still ends eventually, just much deeper.
+   **Elite ("greater") monsters:** the roster stops adding types at Dlvl
+   5, so from `ELITE_DLVL` (6) each non-boss spawn has a 6%/level chance
+   (cap 50%) to be elite: 1.5x HP, double bounty, a dim gold background,
+   "greater X" in every message, and one ability its base type lacks from
+   `ELITE_TRAITS` (flies / regen / siege). `MONSTERS` is shared per type,
+   so the per-creep ability lives in `c.extra`, and **every ability check
+   must read through `trait(c, key)`, never `MONSTERS[c.type][key]`** —
+   otherwise a flying elite would still trigger traps, or a siege elite
+   wouldn't smash. (The lore popup is the exception: it describes the
+   base type, not one creep.) The elite roll happens before
+   `advanceTarget` in `spawnCreep`, since a flying elite routes on
+   `G.flowFly`.
    **Death:** `die(killer)` (from the leak branch of `updateCreeps`) sets
    `lost`, records `G.killedBy` for the tombstone, and picks `G.epitaph`
    once — `drawLost()` runs every frame, so a `pick()` there would

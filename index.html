@@ -448,7 +448,11 @@ const TOWERS = {
        kind: "wall", blocks: true, hp: 25, fg: "#8a6a4a",
        desc: "cheap, pure obstacle -- monsters chip through it over time" },
 };
-const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = 6;
+// No enchant ceiling: towers can go as high as your player level, which
+// itself has no ceiling (see xpForLevel). Range is the one stat that stops
+// growing past RANGE_CAP_LVL -- +0.5/level forever would eventually mean
+// one tower covering the whole map, which breaks the maze game entirely.
+const UPG_MULT = 1.6, UPG_RANGE = 0.5, MAX_LVL = Infinity, RANGE_CAP_LVL = 6;
 // trims both gold income and XP together (see damageCreep) -- a single
 // economy-wide knob. Dropped to 0.75 after reports of finishing Dlvl 1
 // already at max player level, sitting on hundreds of unspent zorkmids,
@@ -475,9 +479,17 @@ const SELL_REFUND_MULT = 0.7, DESCEND_REFUND_MULT = 0.4;
 // reaching it now should feel like a late-game, multi-dungeon-level
 // achievement, not something a single strong level 1 clears.
 const PLAYER_XP_THRESHOLDS = [0, 150, 500, 1400, 3200, 7000]; // cumulative xp for player level 1-6
+// cumulative XP needed to BE at player level L: the hand-tuned table for
+// 1-6, then each further level costs 2.3x the previous one, forever --
+// the dungeon is endless, so player level is too
+function xpForLevel(L) {
+  const n = PLAYER_XP_THRESHOLDS.length;
+  return L <= n ? PLAYER_XP_THRESHOLDS[L - 1]
+    : Math.round(PLAYER_XP_THRESHOLDS[n - 1] * Math.pow(2.3, L - n));
+}
 function playerLevelForXp(xp) {
   let lvl = 1;
-  for (let i = 1; i < PLAYER_XP_THRESHOLDS.length; i++) if (xp >= PLAYER_XP_THRESHOLDS[i]) lvl = i + 1;
+  while (xp >= xpForLevel(lvl + 1)) lvl++;
   return lvl;
 }
 const playerMaxTowerLvl = () => Math.min(MAX_LVL, G.plevel);
@@ -885,7 +897,7 @@ function startWave() {
 
 // which flow field a creep uses: flyers cut straight through any wall
 // of towers (only rock/walls stop them), everything else routes around
-const creepFlow = (c) => MONSTERS[c.type].flies ? G.flowFly : G.flow;
+const creepFlow = (c) => trait(c, "flies") ? G.flowFly : G.flow;
 // point a creep at its next step toward the exit, per its flow field;
 // null next means it's already standing on the exit cell
 function advanceTarget(c) {
@@ -893,6 +905,17 @@ function advanceTarget(c) {
   c.nx = step ? step[0] : c.x;
   c.ny = step ? step[1] : c.y;
 }
+// Past Dlvl 5 the roster stops adding monster types, so the deep dungeon
+// adds "greater" variants instead: each non-boss spawn has a growing
+// chance (6%/level past 5, capped at 50%) to be elite -- 1.5x HP, double
+// bounty, and one ability its base type lacks. Abilities live in
+// MONSTERS, which is shared per type, so a per-creep override goes in
+// c.extra and every ability check reads through trait(c, key) instead of
+// MONSTERS[c.type][key] directly.
+const ELITE_DLVL = 6;
+const ELITE_TRAITS = [{ flies: true }, { regen: 3 }, { siege: true }];
+const trait = (c, k) => (c.extra && c.extra[k] !== undefined) ? c.extra[k] : MONSTERS[c.type][k];
+const creepName = (c) => (c.elite ? "greater " : "") + MONSTERS[c.type].name;
 function spawnCreep(type) {
   const m = MONSTERS[type];
   // boss HP is flat across waves within a level (a short random path
@@ -912,6 +935,13 @@ function spawnCreep(type) {
     subPhase: rnd() * 4,                 // submerge cycle offset (eels)
     slowUntil: 0, hitFlash: 0,
   };
+  // must be decided before advanceTarget: a flying elite routes on G.flowFly
+  if (!m.boss && G.dlvl >= ELITE_DLVL && rnd() < Math.min(0.5, 0.06 * (G.dlvl - 5))) {
+    const options = ELITE_TRAITS.filter(tr => !Object.keys(tr).some(k => m[k]));
+    c.elite = true;
+    c.extra = options.length ? pick(options) : {};
+    c.hp = c.maxHp = Math.round(c.maxHp * 1.5);
+  }
   advanceTarget(c);
   G.creeps.push(c);
   if (m.boss) message("You sense the " + m.name + " is utterly unaffected by " + m.immuneTo + "!");
@@ -1027,7 +1057,7 @@ function sellTower(t) {
   ]));
 }
 const towerDmg = (t) => Math.round(TOWERS[t.type].dmg * Math.pow(UPG_MULT, t.lvl - 1));
-const towerRange = (t) => TOWERS[t.type].range + UPG_RANGE * (t.lvl - 1);
+const towerRange = (t) => TOWERS[t.type].range + UPG_RANGE * (Math.min(t.lvl, RANGE_CAP_LVL) - 1);
 const towerMaxCharges = (t) =>
   Math.round(TOWERS[t.type].maxCharges * Math.pow(1.5, t.lvl - 1));
 const CHARGE_REGEN = 0.4;   // charges/sec -- ~1 every 2.5s while below max
@@ -1110,21 +1140,26 @@ function damageCreep(c, dmg, dtype) {
     // BOUNTY_MULT trims both gold income and XP together (gainXp uses the
     // same trimmed amount) -- a single economy-wide knob rather than
     // hand-editing all ~30 monsters' bounty fields individually
-    const bounty = Math.round(m.bounty * BOUNTY_MULT * ((G.levelMod && G.levelMod.bounty) || 1));
+    // past Dlvl 5, bounty (and thus XP) grows 10%/level so income keeps
+    // pace with rising tower prices (1.18x/level) -- deliberately slower
+    // than monster HP (1.2x/level), so a run still ends eventually; elites
+    // pay double for being harder to kill
+    const bounty = Math.round(m.bounty * BOUNTY_MULT * ((G.levelMod && G.levelMod.bounty) || 1) *
+      Math.pow(1.1, Math.max(0, G.dlvl - 5)) * (c.elite ? 2 : 1));
     G.gold += bounty; G.kills++; G.score += bounty * 10;
     if (m.boss) {
       message(pick([
-        "The " + m.name + " is destroyed!  You feel a surge of triumph!  --More--",
-        "The " + m.name + " collapses in a heap!  Victory is yours!  --More--",
-        "You have slain the " + m.name + "!  The dungeon itself seems to exhale.  --More--",
+        "The " + creepName(c) + " is destroyed!  You feel a surge of triumph!  --More--",
+        "The " + creepName(c) + " collapses in a heap!  Victory is yours!  --More--",
+        "You have slain the " + creepName(c) + "!  The dungeon itself seems to exhale.  --More--",
       ]));
       G.paused = true;
     }
     else message(pick([
-      "The " + m.name + " is destroyed. (+" + bounty + " zorkmids)",
-      "You have slain the " + m.name + ". (+" + bounty + " zorkmids)",
-      "The " + m.name + " falls. (+" + bounty + " zorkmids)",
-      "The " + m.name + " is no more. (+" + bounty + " zorkmids)",
+      "The " + creepName(c) + " is destroyed. (+" + bounty + " zorkmids)",
+      "You have slain the " + creepName(c) + ". (+" + bounty + " zorkmids)",
+      "The " + creepName(c) + " falls. (+" + bounty + " zorkmids)",
+      "The " + creepName(c) + " is no more. (+" + bounty + " zorkmids)",
     ]));
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
@@ -1334,7 +1369,7 @@ function updateTowers(dt) {
       // they pass over a blocking tower -- they never touch the ground
       const victims = G.creeps.filter(c => {
         const [x, y] = creepCell(c);
-        return !c.dead && !isSubmerged(c) && !MONSTERS[c.type].flies && x === t.x && y === t.y;
+        return !c.dead && !isSubmerged(c) && !trait(c, "flies") && x === t.x && y === t.y;
       });
       if (victims.length) {
         for (const c of victims) damageCreep(c, dmg, "fire");
@@ -1416,7 +1451,7 @@ function updateCreeps(dt) {
     const m = MONSTERS[c.type];
     // every monster heals slowly if left alone, same as a tower recharging
     // -- m.regen (currently only the troll) overrides the baseline rate
-    if (c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + (m.regen || BASE_REGEN) * dt);
+    if (c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + (trait(c, "regen") || BASE_REGEN) * dt);
     c.hitFlash = Math.max(0, c.hitFlash - dt);
     let spd = c.spd;
     if (G.time < c.slowUntil) spd *= c.slowFactor;
@@ -1434,11 +1469,11 @@ function updateCreeps(dt) {
         G.fx.push({ cells: [[ex, ey]], ch: m.ch, fg: "#ff5050", ttl: 0.35 });
         G.hp -= m.leak;
         message(pick([
-          "The " + m.name + " descends the stairs!  You lose " + m.leak + " HP.",
-          "The " + m.name + " slips past you and flees below!  You lose " + m.leak + " HP.",
-          "The " + m.name + " reaches the stairs and is gone!  You lose " + m.leak + " HP.",
+          "The " + creepName(c) + " descends the stairs!  You lose " + m.leak + " HP.",
+          "The " + creepName(c) + " slips past you and flees below!  You lose " + m.leak + " HP.",
+          "The " + creepName(c) + " reaches the stairs and is gone!  You lose " + m.leak + " HP.",
         ]));
-        if (G.hp <= 0) { G.hp = 0; die(m); }
+        if (G.hp <= 0) { G.hp = 0; die({ name: creepName(c), fg: m.fg, boss: m.boss }); }
         break;
       }
       advanceTarget(c);
@@ -1488,7 +1523,7 @@ function updateSiege(dt) {
     const spec = TOWERS[t.type];
     if (spec.siegeHp) {
       const attacker = G.creeps.some(c =>
-        !c.dead && MONSTERS[c.type].siege &&
+        !c.dead && trait(c, "siege") &&
         Math.abs(c.x - t.x) + Math.abs(c.y - t.y) === 1);
       if (!attacker) continue;
       t.siegeHp -= SIEGE_DPS * dt;
@@ -1597,7 +1632,7 @@ function drawGame() {
     const empty = spec.maxCharges && Math.floor(t.charges) < 1;
     const cracked = (spec.hp && t.hp < towerMaxHp(t) * 0.4) ||
                     (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t) * 0.4);
-    const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000", "#a0ffb0", "#ff6060"][t.lvl] || spec.fg;
+    const bright = ["", "", "#ffffff", "#ffd0ff", "#ffb000", "#a0ffb0", "#ff6060", "#60e0ff"][Math.min(t.lvl, 7)] || spec.fg; // L7+ share the top color
     const fg = (empty || cracked) ? "#4a4a3a" : (t.lvl === 1 ? spec.fg : bright);
     const picked = G.menu && G.menu.x === t.x && G.menu.y === t.y;
     put(t.x, MAPY + t.y, spec.ch, fg, picked ? "#243024" : undefined);
@@ -1608,7 +1643,9 @@ function drawGame() {
     const fg = c.hitFlash > 0 ? "#ffffff" : (isSubmerged(c) ? "#2a4a5a" : m.fg);
     // flying creeps ignore blocking towers and can share a tower's cell --
     // tint the background so it reads as "flying over", not "on top of"
-    const bg = m.flies && towerAt(x, y) ? "#241a30" : undefined;
+    // flying-over-a-tower tint wins; otherwise a dim gold background marks
+    // an elite ("greater") monster so it reads as dangerous at a glance
+    const bg = trait(c, "flies") && towerAt(x, y) ? "#241a30" : c.elite ? "#3a2e08" : undefined;
     put(x, MAPY + y, m.ch, fg, bg);
   }
   for (const f of G.fx)
@@ -1656,7 +1693,7 @@ function drawGame() {
     const c = G.creeps.find(c => {
       const [x, y] = creepCell(c); return x === hx && y === hy;
     });
-    if (c) l2 = "You see: " + MONSTERS[c.type].name + "  HP:" +
+    if (c) l2 = "You see: " + creepName(c) + "  HP:" +
       Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "") +
       "   (click for lore)";
   }
@@ -1769,7 +1806,7 @@ function drawHelp() {
     " 4 ^ Fire Trap         $15  ON the corridor #  -- unlock $30",
     " 5 \\ Wand of Lightning $30  arcs to 2 more     -- unlock $70",
     " 6 % Dirt Wall         $8   pure block, hp -- free from start",
-    "Enchant up to L" + MAX_LVL + " in the menu -- capped by Lv (kill XP).",
+    "Enchant towers in the menu -- as high as your Lv (kill XP).",
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",
     "ITEMS: r fire  q haste  z cold  c charge  i inv",

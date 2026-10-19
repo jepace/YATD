@@ -127,7 +127,7 @@ it's destroyed with no refund. And the fire trap, powerful as it is, has
 its own weakness: a couple of monster types know how to disarm one by
 simply standing on it.
 
-Towers can be enchanted up to level 6 (`u`) for more damage, range,
+Towers can be enchanted (`u`) for more damage, range (up to L6),
 (wands) charges, or (the wall) HP, or sold (`s`) for a 70% refund
 (destroyed walls give nothing back, since there's nothing left to sell).
 Enchanting is also capped by your **player level** (see Monsters below,
@@ -170,13 +170,19 @@ bounces off its thick scales!") so you're not left guessing why your
 damage numbers stopped moving.
 
 **Gaining experience:** killing monsters earns XP (same amount as their
-gold bounty) toward your **player level** (1–6), shown as `Lv:N` in the
+gold bounty) toward your **player level** (no cap), shown as `Lv:N` in the
 status bar. Player level, not gold, is the real cap on how far you can
 enchant a tower — reaching a new one is announced with its own
 pause-for-SPACE message, same treatment as a boss kill. The XP needed
-per level grows steeply (roughly 2.5–3x each time), so reaching level 6
-is a late-game milestone, not something one strong dungeon level hands
-you.
+per level grows steeply (roughly 2.3–3x each time) and never stops,
+so towers can be enchanted as high as you can level — forever.
+
+**Deeper than Dlvl 5**, monsters keep getting tougher, but so do your
+rewards: kills pay 10% more per level past 5. And **greater monsters**
+start appearing — highlighted with a gold background, a tougher version
+of a normal monster with one ability its kind doesn't usually have
+(flying, fast regeneration, or tower-smashing). They're worth double.
+More of them show up the deeper you go.
 
 Every monster heals a little when left alone — like a tower recharging,
 chip damage that isn't followed up gets undone over time. It's slow

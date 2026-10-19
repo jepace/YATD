@@ -19,6 +19,14 @@ multiple dungeon levels (`descend()` past each wave 10, now endless,
 difficulty scaling with depth).
 
 **Most recently shipped:**
+- **No more level caps on either side.** Player level and tower enchant
+  level are unlimited (`xpForLevel` continues the XP table at 2.3x per
+  level; `MAX_LVL = Infinity`; tower range alone stops growing at L6).
+  Past Dlvl 5, bounty/XP grow 1.1x/level, and elite "greater" monsters
+  (1.5x HP, double bounty, one extra ability, read via `trait(c,k)`)
+  appear at 6%/level up to 50% of spawns. The player's scaling is kept
+  just behind the dungeon's on purpose so runs still end. See `CLAUDE.md`
+  sections 3 and 4.
 - **Endless dungeon, and a real tombstone.** The Dlvl 5 victory is gone:
   every wave-10 clear descends again, forever, until you die. Spawn
   counts grow exponentially only through Dlvl 5 then nearly flat, with
