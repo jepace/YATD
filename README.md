@@ -37,6 +37,9 @@ freshly procedurally generated, wave compositions are randomized, and
 monsters randomly drop items. Add `?seed=N` to the URL to replay a
 particular first dungeon (the seed is shown on the title screen).
 
+Some levels fork: a second corridor gives monsters two routes to the
+stairs, so you have to maze both (or wall one off and defend the other).
+
 ## Items
 
 Slain monsters sometimes drop loot: piles of zorkmids, `?` scrolls of

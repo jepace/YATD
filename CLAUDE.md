@@ -81,6 +81,19 @@ The `<script>` is organized top-to-bottom in sections (marked with
      60 buildable tiles near the path AND path length ≥ 135 (verified this
      invariant doesn't hurt the retry success rate: 200/200 in a scratch
      test after this change, same as before it).
+   - **Branching (`carveBranch()`, `BRANCH_CHANCE` 0.35; about 16% of
+     levels actually get one):** runs in `genLevel()` after the retry
+     loop, before `placeAltar`/`placeShop`. It BFS-carves one extra `#`
+     corridor between two seed-path corridor cells 40–90 steps apart,
+     through "deep rock" only: rock cells with no open orthogonal
+     neighbor other than the two endpoints. So it never touches a wall,
+     door or room, never runs flush along another passage, and can only
+     add connectivity. The leg must be 0.6x to 2x the length of the
+     stretch it bypasses. `BRANCHED = {i, j}` (exposed as
+     `YATD.getBranch()`) records the joined path indices; `levelNotes()`
+     announces "The corridors fork here." Its scratch test checks 1000
+     levels: none disconnected, and on every branched level, blocking
+     the bypassed stretch keeps the exit reachable.
    - RNG: `mulberry32(SEED)`, `rnd()`/`ri(a,b)`. `?seed=N` URL param
      replays a dungeon (first game only); seed shown on title screen.
      `resetGame()` regenerates level+waves except for the very first game

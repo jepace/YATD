@@ -180,6 +180,8 @@ const ALTAR_CHANCE = 0.2, ALTAR_BOON_CHANCE = 0.2, ALTAR_COOLDOWN = 30;
 // a rare shopkeeper '@' (see placeShop / shopBuy): {x, y, stock: {item: n}}
 let SHOP = null;
 const SHOP_CHANCE = 0.15;
+let BRANCHED = null;                    // {i, j}: path indices the extra corridor joins (see carveBranch)
+const BRANCH_CHANCE = 0.35;
 
 // serpentine waypoints: x-columns strictly increase, so no self-crossing
 function genPath() {
@@ -341,8 +343,55 @@ function genLevel() {
     rnd = mulberry32(SEED + i);        // deterministic retries per seed
     if (buildLevel() >= 60 && path.length >= 135) break;
   }
+  carveBranch();
   placeAltar();
   placeShop();
+}
+// Branching layouts: sometimes carve one extra corridor through SOLID
+// ROCK ONLY, joining two corridor cells far apart along the seed path,
+// so there are two routes from < to >.  It never touches a wall, door, or
+// room (so no door/corner logic is involved), and it only ever adds
+// walkable cells, so it can't disconnect anything.  The leg is a BFS
+// through "deep rock": rock cells none of whose orthogonal neighbors is
+// already open (except the two endpoints), so it never runs flush along
+// an existing corridor or wall and reads as a double-wide passage; being
+// a shortest path, it can't run alongside itself either.  It must be at
+// least 60% as long as the stretch it bypasses, so it's a real
+// alternative route rather than a free shortcut that guts the maze.
+function carveBranch() {
+  BRANCHED = null;
+  if (rnd() >= BRANCH_CHANCE) return;
+  const open = (x, y) => map[y][x] !== " ";
+  const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (let guard = 0; guard < 40; guard++) {
+    const i = ri(0, path.length - 41), j = i + ri(40, 90);
+    if (j >= path.length) continue;
+    const [ax, ay] = path[i], [bx, by] = path[j];
+    if (map[ay][ax] !== "#" || map[by][bx] !== "#") continue;
+    const isEnd = (x, y) => (x === ax && y === ay) || (x === bx && y === by);
+    const deep = (x, y) => x >= 1 && x <= MAPW - 2 && y >= 1 && y <= MAPH - 2 && map[y][x] === " " &&
+      N4.every(([dx, dy]) => !open(x + dx, y + dy) || isEnd(x + dx, y + dy));
+    // BFS from a's deep-rock neighbors to any deep-rock neighbor of b
+    const prev = new Map(), q = [];
+    for (const [dx, dy] of N4) if (deep(ax + dx, ay + dy)) { const k = (ax + dx) + "," + (ay + dy); prev.set(k, null); q.push([ax + dx, ay + dy]); }
+    let goal = null;
+    for (let h = 0; h < q.length && !goal; h++) {
+      const [x, y] = q[h];
+      if (Math.abs(x - bx) + Math.abs(y - by) === 1) { goal = [x, y]; break; }
+      for (const [dx, dy] of N4) {
+        const X = x + dx, Y = y + dy, k = X + "," + Y;
+        if (prev.has(k) || !deep(X, Y)) continue;
+        prev.set(k, x + "," + y); q.push([X, Y]);
+      }
+    }
+    if (!goal) continue;
+    const cells = [];
+    for (let k = goal[0] + "," + goal[1]; k; k = prev.get(k)) cells.push(k.split(",").map(Number));
+    if (cells.length < 0.6 * (j - i) || cells.length > 2 * (j - i)) continue;
+    for (const [x, y] of cells) map[y][x] = "#";
+    BRANCHED = { i, j };
+    return;
+  }
 }
 // after the level is final: maybe one altar on room floor, off the
 // generator's seed path and not right beside either staircase
@@ -949,7 +998,7 @@ function resetGame() {
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
-  message(ALTARS.length || SHOP ? "You enter the Dungeons of Doom." + levelNotes() + "  Press SPACE."
+  message(ALTARS.length || SHOP || BRANCHED ? "You enter the Dungeons of Doom." + levelNotes() + "  Press SPACE."
                                 : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
   loadBones();
   setForesight();
@@ -994,7 +1043,8 @@ function descend() {
 // arrival flavor for this level's rare features
 function levelNotes() {
   return (ALTARS.length ? "  An altar stands here." : "") +
-         (SHOP ? "  You hear someone cursing shoplifters." : "");
+         (SHOP ? "  You hear someone cursing shoplifters." : "") +
+         (BRANCHED ? "  The corridors fork here." : "");
 }
 
 // ends the run -- records what did it (for the tombstone) and picks the
@@ -2432,7 +2482,7 @@ window.addEventListener("keydown", (e) => {
 window.YATD = { buildTower, upgradeTower, sellTower, unlockTower, startWave, resetGame,
                 buildable, trapPlaceable, towerAt, path, map,
                 getEntrance: () => ENTRANCE, getExit: () => EXIT,
-                getFlow: () => G.flow, getFlowFly: () => G.flowFly,
+                getFlow: () => G.flow, getFlowFly: () => G.flowFly, getBranch: () => BRANCHED,
                 wouldSealPath };
 
 /* ---------- sound ---------- */
