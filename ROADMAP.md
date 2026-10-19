@@ -246,25 +246,13 @@ only) vs. when full browser verification is still warranted.
 
 ## High value, moderate effort
 
-1. **High-score "bones file."** Persist best scores in `localStorage`
-   with NetHack-style entries ("Keeper the Conjurer, slain on Dlvl 2 by a
-   zombie horde" — `G.dlvl` is now tracked, use it). Show top 5 on the
-   title and death screens.
-2. **Sound via WebAudio.** No assets — synthesize terminal-appropriate
-   bleeps/square waves: build chirp, zap, monster death, leak thud, boss
-   roar, victory arpeggio, a distinct descend chime. `m` to mute, default
-   ON but quiet.
-3. **Give the lich (`L`) its signature ability.** It's shipped as a
-   plain high-HP/regen Dlvl-5 monster (see "most recently shipped"
-   above) but not yet the actual support caster from the original idea:
-   a haste aura on nearby monsters — proximity check among `G.creeps`
-   each frame, cheap at this creep count.
-4. **Level topology variety.** Right now every Dlvl uses the same
-   `genPath`/`genRooms` shape, just re-rolled and scaled harder. Add 1-2
-   alternate topology generators (a big open cavern, a branching Y-split)
-   and pick one per descent — `buildLevel()` already isolates the carving
-   logic, so this is a new `genPath`-like function plus a switch in
-   `buildLevel()`, not a rewrite.
+1. ~~High scores & bones~~: shipped (top 10 in `localStorage`, top 3 on
+   the title screen, rank on the tombstone; ghost bones from Dlvl 2 down).
+2. ~~Sound via WebAudio~~: shipped (`sfx()` recipes, `m` mutes).
+3. ~~Lich haste aura~~: shipped (`aura: 3`, 1.3x).
+4. **Level topology variety.** Partly shipped: `carveBranch()` gives
+   about 16% of levels a second route. Still open: a big open-cavern
+   generator. Also shipped alongside: rare shops and wave foresight.
 
 ## Medium
 
