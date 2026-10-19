@@ -175,6 +175,8 @@ for (let y = 0; y < MAPH; y++) map.push(new Array(MAPW).fill(" "));
 const path = [];           // ordered [x,y], the GENERATOR's seed route
 const pathIdx = new Map(); // "x,y" -> index along path (generation only)
 let ENTRANCE = [0, 0], EXIT = [0, 0];   // the '<' and '>' cells
+let ALTARS = [];                        // [x,y] of this level's altar, if any (see offerSacrifice)
+const ALTAR_CHANCE = 0.2, ALTAR_BOON_CHANCE = 0.2, ALTAR_COOLDOWN = 30;
 
 // serpentine waypoints: x-columns strictly increase, so no self-crossing
 function genPath() {
@@ -334,7 +336,20 @@ function genLevel() {
   SEED = newSeed();
   for (let i = 0; i < 80; i++) {
     rnd = mulberry32(SEED + i);        // deterministic retries per seed
-    if (buildLevel() >= 60 && path.length >= 135) return;
+    if (buildLevel() >= 60 && path.length >= 135) break;
+  }
+  placeAltar();
+}
+// after the level is final: maybe one altar on room floor, off the
+// generator's seed path and not right beside either staircase
+function placeAltar() {
+  ALTARS = [];
+  if (rnd() >= ALTAR_CHANCE) return;
+  for (let guard = 0; guard < 300; guard++) {
+    const x = ri(1, 78), y = ri(1, 19);
+    if (map[y][x] !== "." || onPath(x, y)) continue;
+    if (Math.hypot(x - ENTRANCE[0], y - ENTRANCE[1]) < 4 || Math.hypot(x - EXIT[0], y - EXIT[1]) < 4) continue;
+    map[y][x] = "_"; ALTARS.push([x, y]); return;
   }
 }
 
@@ -361,7 +376,7 @@ const onPath = (x, y) => pathIdx.has(x + "," + y);
 // extra obstacles out of this at runtime (see computeFlow below).
 const terrainWalkable = (x, y) => {
   const g = map[y] && map[y][x];
-  return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{";
+  return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{" || g === "_";
 };
 // true if a live ground creep is DRAWN on (x,y) -- i.e. what you see is
 // what blocks. A creep's true cell (c.x,c.y) and the cell it's stepping
@@ -443,7 +458,7 @@ function wouldSealPath(x, y) {
 
 const TERRAIN_COLOR = {
   "-": "#9aa88a", "|": "#9aa88a", ".": "#3d6b3d", "#": "#6e6e5c",
-  "+": "#c8a832", "<": "#e8e8d8", ">": "#e8e8d8", "{": "#4aa8ff", " ": "#000",
+  "+": "#c8a832", "<": "#e8e8d8", ">": "#e8e8d8", "{": "#4aa8ff", "_": "#d8c8f8", " ": "#000",
 };
 
 /* ---------- data tables ---------- */
@@ -805,7 +820,7 @@ const G = {
   hover: { x: -1, y: -1 },
   speed: 1, autoStart: false, overlay: null, paused: false, autoPaused: false,
   inv: { scroll: 0, potion: 0, wand: 0, charge: 0 }, hasteUntil: 0, seed: 0,
-  levelMod: null, killedBy: null, epitaph: "", decGraphics: true,
+  levelMod: null, killedBy: null, epitaph: "", decGraphics: true, altarReadyAt: 0,
   unlocked: { 1: true, 6: true },      // tower types permanently bought with unlockTower()
   msg: "Welcome to YATD!  Press ? for help.", msgAge: 0, log: [],
   time: 0,
@@ -851,7 +866,7 @@ function setLore(type) {
 }
 
 function resetGame() {
-  G.dlvl = 1; G.levelMod = null; G.killedBy = null; G.epitaph = "";
+  G.dlvl = 1; G.levelMod = null; G.killedBy = null; G.epitaph = ""; G.altarReadyAt = 0;
   if (levelFresh) levelFresh = false;      // keep the title-screen dungeon
   else { genLevel(); genWaves(G.dlvl); }   // every later game is a new one
   G.seed = SEED;
@@ -863,7 +878,8 @@ function resetGame() {
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
   G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
-  message("You enter the Dungeons of Doom.  Build towers, then press SPACE.");
+  message(ALTARS.length ? "You enter the Dungeons of Doom.  An altar stands here.  Press SPACE."
+                        : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
 }
 
 // clearing wave 10 on a level below MAX_DLVL brings a fresh dungeon and
@@ -898,7 +914,7 @@ function descend() {
       "You descend to Dlvl " + G.dlvl + "...  the air grows colder and the dark feels less empty.",
       "You descend to Dlvl " + G.dlvl + "...  the walls press closer here.",
       "You descend to Dlvl " + G.dlvl + "...  something ancient stirs below.",
-    ])) + refundMsg);
+    ])) + (ALTARS.length ? "  An altar stands here." : "") + refundMsg);
 }
 
 // ends the run -- records what did it (for the tombstone) and picks the
@@ -1207,6 +1223,7 @@ function damageCreep(c, dmg, dtype) {
     ]));
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
+    offerSacrifice(cx, cy);
     gainXp(bounty); // called last so a level-up's --More-- message wins over the kill message
   }
 }
@@ -1321,33 +1338,65 @@ function resolveTargeting(x, y) {
     // tower gets its own roll (t.lvl dice of d6), so nothing is ever a
     // sure top-off and a level-1 tower barely benefits compared to a
     // level-4 one
-    const roll = (t) => { let r = 0; for (let i = 0; i < t.lvl; i++) r += ri(1, 6); return r; };
-    let restored = 0;
-    for (const t of G.towers) {
-      if (Math.hypot(t.x - x, t.y - y) > radius) continue;
-      const spec = TOWERS[t.type];
-      if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
-        t.charges = Math.min(towerMaxCharges(t), t.charges + roll(t));
-        restored++;
-      }
-      if (spec.hp && t.hp < towerMaxHp(t)) {
-        t.hp = Math.min(towerMaxHp(t), t.hp + roll(t));
-        restored++;
-      }
-      if (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t)) {
-        t.siegeHp = Math.min(towerMaxSiegeHp(t), t.siegeHp + roll(t));
-        restored++;
-      }
-      if (spec.trapHp && t.trapHp < towerMaxTrapHp(t)) {
-        t.trapHp = Math.min(towerMaxTrapHp(t), t.trapHp + roll(t));
-        restored++;
-      }
-    }
+    const restored = rechargeTowersNear(x, y, radius);
     message(restored
       ? "You zap the wand of charging.  Nearby towers crackle with renewed power!"
       : "You zap the wand of charging, but nothing nearby needed it.");
   }
 }
+// restores towers within `radius` of (x,y) by a dice roll each (t.lvl
+// d6), never a guaranteed top-off -- shared by the wand of charging and
+// the altar's recharge boon. Returns how many pools were topped up.
+function rechargeTowersNear(x, y, radius) {
+  const roll = (t) => { let r = 0; for (let i = 0; i < t.lvl; i++) r += ri(1, 6); return r; };
+  let restored = 0;
+  for (const t of G.towers) {
+    if (Math.hypot(t.x - x, t.y - y) > radius) continue;
+    const spec = TOWERS[t.type];
+    if (spec.maxCharges && t.charges < towerMaxCharges(t)) {
+      t.charges = Math.min(towerMaxCharges(t), t.charges + roll(t)); restored++;
+    }
+    if (spec.hp && t.hp < towerMaxHp(t)) { t.hp = Math.min(towerMaxHp(t), t.hp + roll(t)); restored++; }
+    if (spec.siegeHp && t.siegeHp < towerMaxSiegeHp(t)) {
+      t.siegeHp = Math.min(towerMaxSiegeHp(t), t.siegeHp + roll(t)); restored++;
+    }
+    if (spec.trapHp && t.trapHp < towerMaxTrapHp(t)) {
+      t.trapHp = Math.min(towerMaxTrapHp(t), t.trapHp + roll(t)); restored++;
+    }
+  }
+  return restored;
+}
+
+/* ---------- altars ---------- */
+// Rare (ALTAR_CHANCE per level, at most one): an `_` altar on room floor.
+// Any monster slain on or next to it (8-neighborhood) is a sacrifice;
+// each has an ALTAR_BOON_CHANCE of a response, then the god goes quiet
+// for ALTAR_COOLDOWN seconds. Not every response is a gift -- nothing is
+// perfect. Walkable, not buildable, doesn't block line of sight.
+// (ALTAR_* constants live up by ALTARS -- genLevel needs them at load.)
+function nearAltar(x, y) {
+  return ALTARS.find(([ax, ay]) => Math.abs(ax - x) <= 1 && Math.abs(ay - y) <= 1);
+}
+function offerSacrifice(x, y) {
+  const a = nearAltar(x, y);
+  if (!a || G.time < G.altarReadyAt || rnd() >= ALTAR_BOON_CHANCE) return;
+  G.altarReadyAt = G.time + ALTAR_COOLDOWN;
+  const [ax, ay] = a;
+  pick([
+    () => { G.hp = Math.min(G.maxHp, G.hp + 2); message("You feel a hopeful feeling.  (+2 HP)"); },
+    () => {
+      const n = rechargeTowersNear(ax, ay, 4);
+      message(n ? "A shimmering light surrounds the altar.  Nearby towers are restored."
+                : "A shimmering light surrounds the altar, and fades.");
+    },
+    () => { const g = 10 + 5 * G.dlvl; G.gold += g; message("A gift of " + g + " zorkmids glitters on the altar!"); },
+    () => { G.hasteUntil = Math.max(G.hasteUntil, G.time + 5);
+            message("You feel the touch of your god.  Your towers quicken!  (5s)"); },
+    () => message("You have a feeling of reconciliation."),
+    () => message("You have a feeling of inadequacy."),
+  ])();
+}
+
 function usePotion() {
   if (G.inv.potion < 1) { message("You have no potions to quaff."); return; }
   G.inv.potion--;
@@ -1845,7 +1894,7 @@ function drawMenu() {
     row++;
   }
   if (!opts.length) {
-    text(bx0 + 2, row, "Nothing can be built here.", "#8a8a6a");
+    text(bx0 + 2, row, map[y][x] === "_" ? "Altar: slay monsters beside it." : "Nothing can be built here.", "#8a8a6a");
   } else {
     opts.forEach((o, i) => text(bx0 + 2, row + i, "[" + o.key + "] " + o.label,
       o.disabled ? "#5a5a4a" : "#c8e8b8"));

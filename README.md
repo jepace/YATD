@@ -134,6 +134,13 @@ Enchanting is also capped by your **player level** (see Monsters below,
 "gaining experience") — a fresh player level 1 can't push any tower past
 L1 even with gold to spare.
 
+**Altars.** About one dungeon level in five has an altar (`_`) in one of
+its rooms. Any monster you kill on or right next to it counts as a
+sacrifice, and now and then your god answers: a little healing, a
+recharge for nearby towers, a gift of gold, a burst of speed for your
+towers — or just a vague feeling. After an answer the god goes quiet for
+a while. Routing monsters past the altar with your maze is the trick.
+
 ## Monsters
 
 Around 30 monster types, in tiers that phase in and out with dungeon

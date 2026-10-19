@@ -19,6 +19,12 @@ multiple dungeon levels (`descend()` past each wave 10, now endless,
 difficulty scaling with depth).
 
 **Most recently shipped:**
+- **Rare altars.** ~1 level in 5 gets an `_` altar; kills beside it are
+  sacrifices with a 20% chance of a mixed-blessing response and a 30s
+  cooldown. See `CLAUDE.md` section 3.
+- **Building next to moving monsters fixed.** `creepReserves` now blocks
+  only the cell a monster is *drawn* on; building on its hidden true or
+  next cell snaps/re-routes it instead (`evictCreepsFrom`).
 - **Box-drawing walls (DECgraphics), on by default.** Walls render as
   joined line pieces (`┌─┐│└┘├┤┬┴┼`) picked from each wall cell's
   neighbors at draw time, stroked as real canvas lines so rows join
@@ -317,6 +323,11 @@ only) vs. when full browser verification is still warranted.
     `waveHpScale`/`dlvlMul` slope.
 
 ## Explicitly rejected (don't redo these debates)
+- Openable/closable doors (animals can't open, humanoids can): decided
+  against — with one serpentine route, pathing would almost always force
+  doors open, so they'd rarely matter.
+- Boulders and statues: don't fit this game (no player avatar to push
+  boulders, and `0` is already the Acid Blob).
 
 - Frameworks, bundlers, npm deps, external fonts/CDNs — the single
   self-contained file is a core feature.

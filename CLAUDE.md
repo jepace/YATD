@@ -376,6 +376,25 @@ The `<script>` is organized top-to-bottom in sections (marked with
    charging-wand dice roll — so a new destructible resource on a tower
    doesn't need a fourth copy of that logic, just one more `if`.
 
+   **Altars (`_`, rare):** `placeAltar()` runs at the end of `genLevel()`
+   (after the retry loop settles on a level) and, with `ALTAR_CHANCE`
+   (0.2), puts one altar on room floor — off the generator's seed path
+   and at least 4 cells from either staircase — recording it in the
+   module-level `ALTARS` (like `ENTRANCE`/`EXIT`). It's walkable
+   (`terrainWalkable` includes `_`), not buildable (not `.`), and
+   doesn't block LOS. `damageCreep()`'s kill branch calls
+   `offerSacrifice(cx, cy)` just before `gainXp` (so a level-up message
+   still wins): a kill on or 8-adjacent to an altar has
+   `ALTAR_BOON_CHANCE` (0.2) of a response, then nothing for
+   `ALTAR_COOLDOWN` (30s game time, `G.altarReadyAt`). Responses (one
+   `pick()`): +2 HP, a dice-roll recharge of towers near the altar
+   (`rechargeTowersNear`, shared with the wand of charging), a gold gift,
+   5s of haste, or one of two flavor-only non-answers — not every
+   response is a gift. The `ALTAR_*` constants sit up by `ALTARS`, not
+   in the altar section, because `genLevel()` first runs at load, before
+   the altar section's declarations would exist. Steering monsters past
+   an altar with your maze is the intended play.
+
    **Monster lore popup:** clicking a live creep (when the tile has no
    tower — a tower's own upgrade/sell menu takes priority, e.g. a flying
    creep sharing a tower's cell) opens `G.lore` (a monster type key) via
