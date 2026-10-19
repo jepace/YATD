@@ -218,8 +218,8 @@ it's worth keeping around even once you've unlocked fancier towers.
 ## High scores and bones
 
 Your best ten runs are kept in the browser, and the title screen shows
-the top three. Die on Dlvl 2 or deeper and you leave bones: the next run
-that reaches that level meets your ghost partway through, holding the
+the top three. Die on Dlvl 2 or deeper and you sometimes leave bones: a later run
+that reaches that level may meet your ghost partway through, holding the
 consumables you never used. Kill it to get them back.
 
 ## Controls
