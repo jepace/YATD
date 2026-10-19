@@ -363,16 +363,37 @@ const terrainWalkable = (x, y) => {
   const g = map[y] && map[y][x];
   return g === "." || g === "#" || g === "+" || g === "<" || g === ">" || g === "{";
 };
-// true if a live creep currently sits on (x,y) OR is already mid-step
-// toward it -- creeps render only at their discrete c.x,c.y (no smooth
-// interpolation toward c.nx,c.ny), so a reserved-but-not-yet-arrived cell
-// can look completely empty on screen for the whole duration of that
-// step. Reserving it anyway is still correct: creeps only reroute when
-// they FINISH a step (see advanceTarget/updateCreeps), so a blocking
-// tower dropped onto their already-committed next cell would leave them
-// stranded on top of it with nowhere to go, not smoothly rerouted.
+// true if a live ground creep is DRAWN on (x,y) -- i.e. what you see is
+// what blocks. A creep's true cell (c.x,c.y) and the cell it's stepping
+// into (c.nx,c.ny) are deliberately NOT checked here: the lane jitter
+// (creepCell) draws room-crossing creeps one cell to the side of their
+// true cell, so blocking on true/next cells refused builds on tiles that
+// looked empty while allowing them on the one the monster was drawn on.
+// Building on those hidden cells is made safe instead by
+// evictCreepsFrom(), called right after the tower is placed. Flyers
+// never block: they pass over towers by design.
 const creepReserves = (x, y) =>
-  G.creeps.some(c => !c.dead && ((c.x === x && c.y === y) || (c.nx === x && c.ny === y)));
+  G.creeps.some(c => {
+    if (c.dead || trait(c, "flies")) return false;
+    const [vx, vy] = creepCell(c);
+    return vx === x && vy === y;
+  });
+// after a blocking tower lands on (x,y): a ground creep whose TRUE cell is
+// (x,y) (it was drawn one cell over, so the tile looked empty) snaps onto
+// the cell it was drawn in -- always free floor, creepCell guarantees it
+// -- and one already stepping INTO (x,y) re-targets now, rather than
+// finishing the step onto the tower and being stranded there. Snap
+// targets must be computed BEFORE the tower is pushed (creepCell reads
+// tower occupancy), and the re-targeting needs the NEW flow field.
+function snapTargetsAt(x, y) {
+  return G.creeps.filter(c => !c.dead && !trait(c, "flies") && c.x === x && c.y === y)
+    .map(c => [c, ...creepCell(c)]);
+}
+function evictCreepsFrom(x, y, snaps) {
+  for (const [c, vx, vy] of snaps) { c.x = vx; c.y = vy; c.jit = 0; c.t = 0; advanceTarget(c); }
+  for (const c of G.creeps)
+    if (!c.dead && !trait(c, "flies") && c.nx === x && c.ny === y) advanceTarget(c);
+}
 const buildable = (x, y) =>
   map[y] && map[y][x] === "." && !towerAt(x, y) && !creepReserves(x, y);
 const trapPlaceable = (x, y) => {
@@ -1003,7 +1024,7 @@ function buildTower(type, x, y) {
     message(spec.kind === "trap"
       ? "Traps only work laid across open corridor or a doorway."
       : creepReserves(x, y)
-        ? "A monster is already moving onto that tile -- wait a beat and try again."
+        ? "There's a monster standing there -- wait a beat and try again."
         : "You cannot build there.");
     return false;
   }
@@ -1019,8 +1040,9 @@ function buildTower(type, x, y) {
   if (spec.hp) t.hp = spec.hp;
   if (spec.siegeHp) t.siegeHp = spec.siegeHp;
   if (spec.trapHp) t.trapHp = spec.trapHp;
+  const snaps = spec.blocks ? snapTargetsAt(x, y) : [];
   G.towers.push(t);
-  if (spec.blocks) G.flow = computeFlow();
+  if (spec.blocks) { G.flow = computeFlow(); evictCreepsFrom(x, y, snaps); }
   const article = /^[aeiou]/i.test(spec.name) ? "an" : "a";
   message(pick([
     "You conjure " + article + " " + spec.name + ".",

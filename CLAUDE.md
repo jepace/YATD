@@ -90,20 +90,21 @@ The `<script>` is organized top-to-bottom in sections (marked with
      tower placement or monster movement; see the pathfinding note in
      section 4. `ENTRANCE`/`EXIT` (the `<`/`>` cells) are the real runtime
      anchors, set by `buildLevel()`.
-   - Placement rules: `buildable(x,y)` = any room floor `.` tile, not
-     already occupied by a tower or a creep (`creepReserves(x,y)` — the
-     creep's current cell OR the cell it's already committed to stepping
-     into). Creeps don't render interpolated between cells, only at
-     their discrete `c.x,c.y` (see section 4), so a cell reserved via
-     `c.nx,c.ny` can look completely empty for the whole duration of that
-     step — `buildTower()` gives a distinct "a monster is already moving
-     onto that tile" message in that case (checked via `creepReserves`
-     again) instead of the generic refusal, and `drawGame()` tints the
-     hovered tile the same way so the reason is visible without even
-     attempting to build. The reservation itself can't be relaxed: creeps
-     only reroute when they *finish* a step, so a blocking tower dropped
-     onto an already-committed `nx,ny` would strand them on top of it
-     with nowhere to go. `trapPlaceable(x,y)` = any corridor/door tile,
+   - Placement rules: `buildable(x,y)` = any room floor `.` tile with no
+     tower and no ground creep DRAWN on it (`creepReserves(x,y)` compares
+     against `creepCell(c)`, the jittered on-screen cell — not the creep's
+     true `c.x,c.y` or its next step `c.nx,c.ny`). It used to check the
+     true and next cells, which the lane jitter makes invisible: a
+     room-crossing creep is drawn one cell sideways, so empty-looking
+     tiles refused builds while the tile the monster was drawn on
+     allowed them (a real reported bug). Building on those hidden cells
+     is made safe by `buildTower()` instead: `snapTargetsAt(x,y)` (before
+     the tower is pushed — `creepCell` reads tower occupancy) records any
+     creep whose TRUE cell is the target, then after `computeFlow()`,
+     `evictCreepsFrom(x,y,snaps)` snaps those creeps onto the cell they
+     were drawn in (always free floor) and re-targets any creep stepping
+     INTO the cell via `advanceTarget`, so nobody finishes a step onto a
+     tower and gets stranded. Flyers never block building. `trapPlaceable(x,y)` = any corridor/door tile,
      unoccupied by a tower (creeps are fine to trap under — traps don't
      block). Both can now target tiles monsters actually walk over — see
      section 4.
