@@ -256,6 +256,7 @@ while deciding what to build.
 - `Ctrl-P` message log (like NetHack's `^P`) · `?` help · `Escape` closes
   whatever overlay or menu is open
 - `g` toggles box-drawing walls (NetHack's DECgraphics) vs. classic `|` and `-`
+- `m` toggles sound (synthesized blips, nothing downloaded)
 - `a` auto-start waves · `+`/`-` game speed · `R` restart
 
 Good luck. The dungeon is counting on you.

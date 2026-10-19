@@ -734,6 +734,17 @@ The `<script>` is organized top-to-bottom in sections (marked with
    G.lore) && G.autoPaused` is true, since pause state is governed by
    the open menu/targeting arm/lore popup in that case, not by SPACE.
 
+**Sound** (section `sound`, just above the main loop): `sfx(name)` plays
+   a `SFX` recipe, a list of `[waveform, startHz, endHz, seconds]` notes
+   synthesized with WebAudio oscillators (no audio files). Each recipe
+   has its own `gap` throttle. The `AudioContext` is created and resumed
+   from the first key or pointer event, because browsers block audio
+   before a gesture; until then `sfx` is a silent no-op. `m` toggles
+   `MUTED`, which is saved in `yatd.muted`. Call sites: build, kill,
+   leak, wave start and clear, level-up, boss kill, death, fireball, and
+   both zapped wands. Don't add a sound for every tower shot; it turns
+   into noise.
+
 8. **Main loop** — fixed-timestep (`STEP = 1/60`) accumulator inside
    `requestAnimationFrame`; `G.speed` multiplies accumulated time. Put
    all gameplay logic in `update(dt)`, never in draw functions.

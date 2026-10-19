@@ -559,6 +559,7 @@ function gainXp(amount) {
     message("You feel more experienced!  (player level " + G.plevel +
       " -- towers can enchant to L" + G.plevel + " now)  --More--");
     G.paused = true;
+    sfx("level");
   }
 }
 // gold buys less the deeper you go -- zorkmids you're still carrying at
@@ -999,6 +1000,7 @@ function loadBones() {
 }
 function die(killer) {
   G.state = "lost";
+  sfx("die");
   const entry = { score: G.score, dlvl: G.dlvl, wave: G.wave, killer: killer.name,
                   date: new Date().toISOString().slice(0, 10) };
   HISCORES.push(entry);
@@ -1024,6 +1026,7 @@ function startWave() {
   if (G.state !== "build" || G.wave >= WAVES.length) return;
   G.wave++;
   G.state = "wave";
+  sfx("wave");
   G.spawnQueue = [];
   let delay = 0.5;
   for (const grp of WAVES[G.wave - 1]) {
@@ -1144,6 +1147,7 @@ function buildTower(type, x, y) {
   if (spec.trapHp) t.trapHp = spec.trapHp;
   const snaps = spec.blocks ? snapTargetsAt(x, y) : [];
   G.towers.push(t);
+  sfx("build");
   if (spec.blocks) { G.flow = computeFlow(); evictCreepsFrom(x, y, snaps); }
   const article = /^[aeiou]/i.test(spec.name) ? "an" : "a";
   message(pick([
@@ -1300,6 +1304,7 @@ function damageCreep(c, dmg, dtype) {
         "You have slain the " + creepName(c) + "!  The dungeon itself seems to exhale.  --More--",
       ]));
       G.paused = true;
+      sfx("boss");
     }
     else message(pick([
       "The " + creepName(c) + " is destroyed. (+" + bounty + " zorkmids)",
@@ -1307,6 +1312,7 @@ function damageCreep(c, dmg, dtype) {
       "The " + creepName(c) + " falls. (+" + bounty + " zorkmids)",
       "The " + creepName(c) + " is no more. (+" + bounty + " zorkmids)",
     ]));
+    if (!m.boss) sfx("kill");
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
     if (c.type === "ghost" && G.bones) {
@@ -1411,11 +1417,12 @@ function resolveTargeting(x, y) {
       damageCreep(c, 45, "fire");
       hit++;
     }
+    sfx("fire");
     message(hit
       ? "You read the scroll.  A pillar of flame erupts!"
       : "You read the scroll, but nothing was close enough to burn.");
   } else if (kind === "wand") {
-    G.inv.wand--;
+    G.inv.wand--; sfx("zap");
     let hit = 0;
     for (const c of G.creeps) {
       if (!inRange(c)) continue;
@@ -1426,7 +1433,7 @@ function resolveTargeting(x, y) {
       ? "You zap the wand of cold.  Monsters nearby shiver and slow!"
       : "You zap the wand of cold, but nothing was close enough to chill.");
   } else if (kind === "charge") {
-    G.inv.charge--;
+    G.inv.charge--; sfx("zap");
     // like the real thing, this is not a guaranteed full recharge -- each
     // tower gets its own roll (t.lvl dice of d6), so nothing is ever a
     // sure top-off and a level-1 tower barely benefits compared to a
@@ -1660,6 +1667,7 @@ function updateCreeps(dt) {
         // never actually be seen reaching the stairs
         G.fx.push({ cells: [[ex, ey]], ch: m.ch, fg: "#ff5050", ttl: 0.35 });
         G.hp -= m.leak;
+        sfx("leak");
         message(pick([
           "The " + creepName(c) + " descends the stairs!  You lose " + m.leak + " HP.",
           "The " + creepName(c) + " slips past you and flees below!  You lose " + m.leak + " HP.",
@@ -1772,6 +1780,7 @@ function update(dt) {
   if (!G.paused && G.state === "wave" && !G.spawnQueue.length && !G.creeps.length) {
     // wave cleared
     const bonus = 10 + G.wave * 2;
+    sfx("clear");
     G.gold += bonus; G.score += 100 * G.wave * G.dlvl;
     if (G.wave >= WAVES.length) {
       descend();   // no final level -- the dungeon goes down forever
@@ -2022,7 +2031,7 @@ function drawHelp() {
     "Each level's dragon resists a random element -- mix",
     "your damage types, one tower type won't always win.",
     "ITEMS: r fire  q haste  z cold  c charge  i inv",
-    "KEYS: SPACE wave/pause  a auto  g walls  ^P log  R restart",
+    "KEYS: SPACE wave/pause  a auto  g walls  m sound  ^P log  R restart",
     "      hjkl/arrows+ENTER cursor  + - speed",
     "",
     "~30 monsters, phasing in/out by dungeon level. Some fly,",
@@ -2330,6 +2339,8 @@ window.addEventListener("keydown", (e) => {
         message(G.paused ? "Time stands still.  (SPACE to resume)" : "Time flows once more.");
       }
       return;
+    case "m": MUTED = !MUTED; saveJSON("yatd.muted", MUTED);
+      message(MUTED ? "You can no longer hear anything." : "You can hear again."); return;
     case "g": G.decGraphics = !G.decGraphics;
       message("DECgraphics " + (G.decGraphics ? "on: box-drawing walls." : "off: classic | and - walls.")); return;
     case "a": G.autoStart = !G.autoStart;
@@ -2369,6 +2380,55 @@ window.YATD = { buildTower, upgradeTower, sellTower, unlockTower, startWave, res
                 getEntrance: () => ENTRANCE, getExit: () => EXIT,
                 getFlow: () => G.flow, getFlowFly: () => G.flowFly,
                 wouldSealPath };
+
+/* ---------- sound ---------- */
+// Tiny WebAudio blips, synthesized on the fly (no audio files -- the
+// one-file rule).  Each recipe is a list of [waveform, startHz, endHz,
+// seconds] notes played back to back.  Browsers only allow audio after a
+// user gesture, so the context is created/resumed from the first key or
+// click.  sfx() throttles each sound so a busy wave doesn't turn into
+// noise.  `m` toggles mute, remembered in localStorage.
+let AUDIO = null, MUTED = !!loadJSON("yatd.muted", false);
+const SFX = {
+  build: { notes: [["square", 220, 440, 0.07]], gap: 0.05 },
+  kill:  { notes: [["square", 660, 220, 0.06]], gap: 0.06, vol: 0.03 },
+  leak:  { notes: [["sawtooth", 320, 70, 0.3]], gap: 0.2 },
+  wave:  { notes: [["triangle", 160, 160, 0.12], ["triangle", 240, 240, 0.18]], gap: 0.5 },
+  clear: { notes: [["triangle", 440, 440, 0.1], ["triangle", 660, 660, 0.1], ["triangle", 880, 880, 0.2]], gap: 0.5 },
+  level: { notes: [["square", 523, 523, 0.08], ["square", 659, 659, 0.08], ["square", 784, 784, 0.16]], gap: 0.5 },
+  boss:  { notes: [["sawtooth", 110, 110, 0.15], ["square", 330, 330, 0.12], ["square", 440, 440, 0.12], ["square", 660, 660, 0.3]], gap: 1 },
+  fire:  { notes: [["sawtooth", 220, 50, 0.4]], gap: 0.1 },
+  zap:   { notes: [["sine", 1200, 600, 0.15]], gap: 0.1 },
+  die:   { notes: [["triangle", 392, 392, 0.25], ["triangle", 330, 330, 0.25], ["triangle", 262, 262, 0.25], ["triangle", 196, 196, 0.6]], gap: 1 },
+};
+const sfxLast = {};
+function unlockAudio() {
+  try {
+    if (!AUDIO) AUDIO = new (window.AudioContext || window.webkitAudioContext)();
+    if (AUDIO.state === "suspended") AUDIO.resume();
+  } catch (e) { AUDIO = null; }
+}
+window.addEventListener("keydown", unlockAudio, true);
+window.addEventListener("pointerdown", unlockAudio, true);
+function sfx(name) {
+  const r = SFX[name];
+  if (MUTED || !AUDIO || !r || AUDIO.state !== "running") return;
+  const now = AUDIO.currentTime;
+  if (sfxLast[name] !== undefined && now - sfxLast[name] < r.gap) return;
+  sfxLast[name] = now;
+  let t = now;
+  for (const [type, f0, f1, dur] of r.notes) {
+    const o = AUDIO.createOscillator(), g = AUDIO.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(r.vol || 0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(AUDIO.destination);
+    o.start(t); o.stop(t + dur);
+    t += dur;
+  }
+}
 
 /* ---------- main loop ---------- */
 let last = performance.now(), acc = 0;
