@@ -492,7 +492,10 @@ const trapPlaceable = (x, y) => {
 // dry-run check before committing to a placement. `ignoreTowerBlocks`
 // computes the field flying monsters use -- they cut straight through
 // any wall of towers, only rock/walls stop them (see G.flowFly).
-function computeFlow(extraBlocked, ignoreTowerBlocks) {
+// `goal` (default EXIT) is the BFS source.  A non-default goal is seeded
+// even if it isn't walkable itself (a thief's target tower), so creeps
+// route to the cells beside it.
+function computeFlow(extraBlocked, ignoreTowerBlocks, goal) {
   const dist = Array.from({ length: MAPH }, () => new Array(MAPW).fill(Infinity));
   const next = Array.from({ length: MAPH }, () => new Array(MAPW).fill(null));
   const blocked = new Set(ignoreTowerBlocks ? [] :
@@ -501,8 +504,8 @@ function computeFlow(extraBlocked, ignoreTowerBlocks) {
   const passable = (x, y) =>
     x >= 0 && y >= 0 && x < MAPW && y < MAPH &&
     terrainWalkable(x, y) && !blocked.has(x + "," + y);
-  const [ex, ey] = EXIT;
-  if (!passable(ex, ey)) return { dist, next };
+  const [ex, ey] = goal || EXIT;
+  if (!goal && !passable(ex, ey)) return { dist, next };
   dist[ey][ex] = 0;
   const q = [[ex, ey]];
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -678,7 +681,7 @@ const MONSTERS = {
   kobold:   { name: "kobold",        ch: "k", hp: 18,  spd: 2.2, bounty: 3,  leak: 1, fg: "#e85050",
               lore: "A kobold, small and cowardly alone, but never truly alone." },
 
-  eel:      { name: "giant eel",     ch: ";", hp: 30,  spd: 2.0, bounty: 5,  leak: 2, fg: "#50a8e8",
+  eel:      { name: "giant eel",     ch: ";", hp: 30,  spd: 2.0, bounty: 5,  leak: 2, fg: "#50a8e8", motive: "water",
               submerges: true, immuneTo: "electric",
               lore: "A giant eel lurks beneath the surface, surfacing only to strike -- lightning won't touch it." },
   orc:      { name: "orc",           ch: "o", hp: 42,  spd: 1.8, bounty: 5,  leak: 2, fg: "#e8a050",
@@ -714,7 +717,14 @@ const MONSTERS = {
               lore: "A wraith drifts through solid matter as easily as smoke -- your maze means nothing to it." },
   // never in genWaves' pool: only placed by loadBones() when a previous
   // run died on this Dlvl, carrying that run's unused consumables
-  ghost:    { name: "ghost",         ch: "W", hp: 80,  spd: 1.3, bounty: 15, leak: 4, fg: "#e8e8f0", flies: true,
+  // the dungeon's other motives (see MOTIVES): thieves and pilgrims
+  leprechaun:{ name: "leprechaun",   ch: "l", hp: 14,  spd: 3.6, bounty: 4,  leak: 1, fg: "#50c850", motive: "steal",
+              lore: "A leprechaun cares nothing for the Amulet.  It darts to your nearest tower, lifts the gold from its strongbox, and bolts back upstairs.  Catch it and the gold is yours again." },
+  nymph:    { name: "nymph",         ch: "n", hp: 18,  spd: 3.0, bounty: 5,  leak: 1, fg: "#e8a0d0", motive: "steal",
+              lore: "A nymph charms a tower's keeper and walks off with something precious -- an item from your pack, or a quiver of arrows -- then flees for the upstairs.  Kill her to get it back." },
+  acolyte:  { name: "acolyte",       ch: "@", hp: 26,  spd: 2.0, bounty: 4,  leak: 1, fg: "#c8a0f0", motive: "pray",
+              lore: "An acolyte of some dark god.  It stops to pray at the altar, and the monsters around it are mended, before it goes on down toward the Amulet." },
+  ghost:    { name: "ghost",         ch: "W", hp: 80,  spd: 1.3, bounty: 15, leak: 4, fg: "#e8e8f0", flies: true, motive: "escape",
               lore: "The restless shade of a Keeper who fell on this very level.  It still clutches whatever it died carrying -- lay it to rest and those things are yours again." },
   gspider:  { name: "giant spider",  ch: "s", hp: 60,  spd: 3.2, bounty: 10, leak: 2, fg: "#582888",
               lore: "A larger, meaner cousin of the giant spider, no less quick underfoot." },
@@ -730,7 +740,7 @@ const MONSTERS = {
               lore: "A ghoul, undead and patient, slowly knitting itself back together." },
   felem:    { name: "fire elemental",ch: "e", hp: 140, spd: 2.0, bounty: 22, leak: 3, fg: "#ff8030", immuneTo: "fire",
               lore: "A fire elemental, wreathed in flame -- fire won't touch it, but cold will." },
-  kraken:   { name: "kraken",        ch: ";", hp: 220, spd: 1.8, bounty: 35, leak: 4, fg: "#2868a8",
+  kraken:   { name: "kraken",        ch: ";", hp: 220, spd: 1.8, bounty: 35, leak: 4, fg: "#2868a8", motive: "water",
               submerges: true, immuneTo: "electric",
               lore: "A kraken, the eel's monstrous elder -- submerges at will, and lightning slides right off it." },
   lich:     { name: "lich",          ch: "L", hp: 180, spd: 1.5, bounty: 28, leak: 3, fg: "#e8e8c8", regen: 2, aura: 3,
@@ -801,6 +811,9 @@ function genWaves(dlvl, countMul) {
     { t: "gridbug",   cost: 1,  gap: 0.3, min: 1, minDlvl: 1, maxDlvl: 2 },
     { t: "ant",       cost: 1,  gap: 0.35,min: 2, minDlvl: 1, maxDlvl: 3 },
     { t: "jackal",    cost: 1,  gap: 0.5, min: 1, minDlvl: 1 },
+    { t: "leprechaun",cost: 5,  gap: 1.0, min: 3, minDlvl: 1 },
+    { t: "nymph",     cost: 6,  gap: 1.2, min: 4, minDlvl: 2 },
+    { t: "acolyte",   cost: 4,  gap: 1.2, min: 2, minDlvl: 1, needsAltar: true },
     { t: "bat",       cost: 2,  gap: 0.5, min: 2, minDlvl: 1, maxDlvl: 4 },
     { t: "kobold",    cost: 2,  gap: 0.7, min: 2, minDlvl: 1, maxDlvl: 3 },
 
@@ -834,7 +847,8 @@ function genWaves(dlvl, countMul) {
   for (let w = 1; w <= 10; w++) {
     const budget = (w === 10 ? 55 : 8 * Math.pow(1.5, w - 1)) * dlvlMul * (0.85 + rnd() * 0.3);
     const avail = pool.filter(p =>
-      w >= p.min && dlvl >= (p.minDlvl || 1) && dlvl <= (p.maxDlvl || Infinity));
+      w >= p.min && dlvl >= (p.minDlvl || 1) && dlvl <= (p.maxDlvl || Infinity) &&
+      (!p.needsAltar || ALTARS.length));
     const nTypes = Math.min(avail.length, w < 3 ? ri(1, 2) : ri(2, 3));
     const chosen = [];
     let guard = 0;
@@ -875,6 +889,9 @@ const FORESIGHT = {
   W: ["You feel a chill.", "You hear a hollow whisper."],
   e: ["You feel a wave of heat.", "You smell smoke."],
   L: ["You feel the cold touch of necromancy.", "Something ancient stirs."],
+  l: ["You hear the chink of coins and a high giggle.", "Someone is counting your money."],
+  n: ["You hear soft, beguiling laughter.", "You smell a sweet perfume."],
+  "@": ["You hear distant chanting.", "You hear a prayer, in a tongue you don't know."],
 };
 const IMMUNE_NAME = { fire: "fire", cold: "frost", acid: "acid", electric: "lightning" };
 function setForesight() {
@@ -996,7 +1013,7 @@ function resetGame() {
   G.towers = []; G.creeps = []; G.fx = []; G.log = [];
   G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.speed = 1; G.autoStart = false; G.overlay = null; G.paused = false; G.autoPaused = false;
-  G.flow = computeFlow();          // no towers on a fresh level, but keeps shape consistent
+  setFlow();          // no towers on a fresh level, but keeps shape consistent
   G.flowFly = computeFlow(null, true); // static per level -- only walls/rock stop flyers
   message(ALTARS.length || SHOP || BRANCHED ? "You enter the Dungeons of Doom." + levelNotes() + "  Press SPACE."
                                 : "You enter the Dungeons of Doom.  Build towers, then press SPACE.");
@@ -1026,7 +1043,7 @@ function descend() {
   G.towers = []; G.creeps = []; G.fx = [];
   G.spawnQueue = []; G.menu = null; G.targeting = null; G.lore = null;
   G.hp = Math.min(G.maxHp, G.hp + Math.round(G.maxHp * 0.25));
-  G.flow = computeFlow();
+  setFlow();
   G.flowFly = computeFlow(null, true);
   G.state = "build";
   loadBones();
@@ -1123,7 +1140,19 @@ function startWave() {
 
 // which flow field a creep uses: flyers cut straight through any wall
 // of towers (only rock/walls stop them), everything else routes around
-const creepFlow = (c) => trait(c, "flies") ? G.flowFly : G.flow;
+// Not every monster wants the downstairs (see MOTIVES): a creep with
+// c.goal routes on a flow field toward that cell instead.  Those fields
+// are built lazily and cached per (goal, flies) in G.flowCache, which
+// setFlow() empties whenever towers change, since every recomputation of
+// G.flow must go through it.
+function setFlow() { G.flow = computeFlow(); G.flowCache = {}; }
+function flowTo(gx, gy, flies) {
+  const k = gx + "," + gy + (flies ? "f" : "");
+  if (!G.flowCache) G.flowCache = {};
+  return G.flowCache[k] || (G.flowCache[k] = computeFlow(null, flies, [gx, gy]));
+}
+const creepFlow = (c) => c.goal ? flowTo(c.goal.x, c.goal.y, !!trait(c, "flies"))
+                               : trait(c, "flies") ? G.flowFly : G.flow;
 // point a creep at its next step toward the exit, per its flow field;
 // null next means it's already standing on the exit cell
 function advanceTarget(c) {
@@ -1142,6 +1171,95 @@ const ELITE_DLVL = 6;
 const ELITE_TRAITS = [{ flies: true }, { regen: 3 }, { siege: true }];
 const trait = (c, k) => (c.extra && c.extra[k] !== undefined) ? c.extra[k] : MONSTERS[c.type][k];
 const creepName = (c) => (c.elite ? "greater " : "") + MONSTERS[c.type].name;
+/* Motives.  Below everything lies the Amulet of Yendor, and nearly every
+   monster is drawn down toward it -- that's why they all head for '>'.
+   A few want something else, set by MONSTERS[type].motive and carried
+   as c.goal = { kind, x, y, adj? } (routed by creepFlow / flowTo):
+     escape -- the bones ghost: starts mid-level, wants OUT, heads up to '<'
+     steal  -- leprechaun / nymph: to a tower (adj: stop beside it), rob
+               it, then escape upstairs with c.loot (killing returns it)
+     pray   -- acolyte: to the altar, prays (heals nearby monsters), then down
+     water  -- eel / kraken: detour through a fountain, then down
+     flee   -- any badly hurt non-boss may turn back toward '<' for a while
+   Goal creeps never leak on '>' -- only the Amulet-seekers do -- and an
+   escaping creep costs no HP: it's leaving, not going deeper. */
+const FLEE_CHANCE = 0.3, FLEE_TIME = 3, PRAY_TIME = 2, PRAY_HEAL = 0.3, PRAY_RADIUS = 3;
+function stealTargets() {
+  return G.towers.filter(t => TOWERS[t.type].blocks && TOWERS[t.type].kind !== "wall");
+}
+function assignMotive(c, m) {
+  const flies = !!trait(c, "flies");
+  let g = null;
+  if (m.motive === "escape") {
+    // a ghost haunts the spot it died, not the stairs: somewhere mid-level
+    for (let guard = 0; guard < 300; guard++) {
+      const x = ri(1, MAPW - 2), y = ri(1, MAPH - 2);
+      if (map[y][x] !== "." || Math.hypot(x - ENTRANCE[0], y - ENTRANCE[1]) < 10 ||
+          Math.hypot(x - EXIT[0], y - EXIT[1]) < 10) continue;
+      c.x = c.nx = x; c.y = c.ny = y;
+      break;
+    }
+    g = { kind: "escape", x: ENTRANCE[0], y: ENTRANCE[1] };
+  } else if (m.motive === "steal") {
+    const ts = stealTargets();
+    if (ts.length) { const t = pick(ts); g = { kind: "steal", x: t.x, y: t.y, adj: true }; }
+  } else if (m.motive === "pray" && ALTARS.length) {
+    g = { kind: "pray", x: ALTARS[0][0], y: ALTARS[0][1] };
+  } else if (m.motive === "water") {
+    const fs = [];
+    for (let y = 0; y < MAPH; y++) for (let x = 0; x < MAPW; x++) if (map[y][x] === "{") fs.push([x, y]);
+    if (fs.length) { const [x, y] = pick(fs); g = { kind: "water", x, y }; }
+  }
+  // a goal it can't reach (walled off by towers) is no goal at all
+  if (g && !isFinite(flowTo(g.x, g.y, flies).dist[c.y][c.x])) g = null;
+  c.goal = g;
+}
+const lootName = (l) => l.gold ? l.gold + " zorkmids" : l.item ? "your " + SHOP_ITEMS[l.item].name
+                      : l.charges ? "a quiver of arrows" : "nothing";
+// called when a goal creep reaches its goal (beside it, for adj goals)
+function arriveGoal(c, m) {
+  const g = c.goal, up = { kind: "escape", x: ENTRANCE[0], y: ENTRANCE[1] };
+  if (g.kind === "escape") {
+    c.dead = true; c.leaked = true;
+    G.fx.push({ cells: [[c.x, c.y]], ch: m.ch, fg: "#a0a0ff", ttl: 0.35 });
+    if (c.type === "ghost") {
+      G.bones = null;
+      message("The ghost flees up the stairs, out of this place -- and your old possessions go with it.");
+    } else if (c.loot) {
+      message("The " + creepName(c) + " escapes up the stairs with " + lootName(c.loot) + "!");
+    } else {
+      message("The " + creepName(c) + " scurries back up the stairs.");
+    }
+  } else if (g.kind === "steal") {
+    const t = G.towers.find(t => t.x === g.x && t.y === g.y);
+    const tname = t ? TOWERS[t.type].name : "";
+    if (!t) message("The " + creepName(c) + " finds nothing left to rob, and turns for the stairs.");
+    else if (m.ch === "l") {
+      const amt = Math.min(G.gold, 15 + 5 * G.dlvl);
+      if (amt > 0) { G.gold -= amt; c.loot = { gold: amt }; }
+      message(amt > 0 ? "The leprechaun snatches " + amt + " zorkmids from the " + tname + "'s strongbox!"
+                      : "The leprechaun finds the " + tname + "'s strongbox empty, and cackles anyway.");
+    } else {
+      const items = Object.keys(G.inv).filter(k => G.inv[k] > 0);
+      if (items.length) {
+        const k = pick(items); G.inv[k]--; c.loot = { item: k };
+        message("The nymph charms the " + tname + " and steals " + lootName(c.loot) + "!");
+      } else if (TOWERS[t.type].maxCharges && t.charges >= 1) {
+        c.loot = { charges: Math.floor(t.charges), tower: t }; t.charges = 0;
+        message("The nymph charms the " + tname + " and walks off with its quiver!");
+      } else message("The nymph looks over the " + tname + ", finds nothing she wants, and pouts.");
+    }
+    c.goal = up;
+  } else if (g.kind === "pray") {
+    c.waitUntil = G.time + PRAY_TIME;
+    for (const o of G.creeps) if (!o.dead && Math.hypot(o.x - c.x, o.y - c.y) <= PRAY_RADIUS)
+      o.hp = Math.min(o.maxHp, o.hp + o.maxHp * PRAY_HEAL);
+    message("The " + creepName(c) + " prays at the altar.  The monsters around it look healthier!");
+    c.goal = null;
+  } else {   // water, or a flee that reached the stairs: back to the Amulet
+    c.goal = null;
+  }
+}
 function spawnCreep(type) {
   const m = MONSTERS[type];
   // boss HP is flat across waves within a level (a short random path
@@ -1168,6 +1286,7 @@ function spawnCreep(type) {
     c.extra = options.length ? pick(options) : {};
     c.hp = c.maxHp = Math.round(c.maxHp * 1.5);
   }
+  assignMotive(c, m);
   advanceTarget(c);
   G.creeps.push(c);
   if (m.boss) message("You sense the " + m.name + " is utterly unaffected by " + m.immuneTo + "!");
@@ -1226,7 +1345,7 @@ function buildTower(type, x, y) {
   const snaps = spec.blocks ? snapTargetsAt(x, y) : [];
   G.towers.push(t);
   sfx("build");
-  if (spec.blocks) { G.flow = computeFlow(); evictCreepsFrom(x, y, snaps); }
+  if (spec.blocks) { setFlow(); evictCreepsFrom(x, y, snaps); }
   const article = /^[aeiou]/i.test(spec.name) ? "an" : "a";
   message(pick([
     "You conjure " + article + " " + spec.name + ".",
@@ -1277,7 +1396,7 @@ function sellTower(t) {
   // G.menu (if open on this tile) is left as-is -- menuOptions() is
   // recomputed live each frame, so it naturally rolls over to showing
   // build options for the now-empty tile
-  if (TOWERS[t.type].blocks) G.flow = computeFlow();
+  if (TOWERS[t.type].blocks) setFlow();
   message(pick([
     "You dismantle the " + TOWERS[t.type].name + " for " + refund + " zorkmids.",
     "You break down the " + TOWERS[t.type].name + " and pocket " + refund + " zorkmids.",
@@ -1388,6 +1507,11 @@ function damageCreep(c, dmg, dtype) {
     return; // shrugs it off entirely
   }
   c.hp -= dmg; c.hitFlash = 0.1;
+  // NetHack monsters flee when badly hurt; ours sometimes turn back upstairs
+  if (c.hp > 0 && !c.fled && !c.goal && !MONSTERS[c.type].boss && c.hp < c.maxHp * 0.25) {
+    c.fled = true;
+    if (rnd() < FLEE_CHANCE) c.goal = { kind: "flee", x: ENTRANCE[0], y: ENTRANCE[1], until: G.time + FLEE_TIME };
+  }
   if (c.hp <= 0 && !c.dead) {
     c.dead = true;
     const m = MONSTERS[c.type];
@@ -1421,6 +1545,14 @@ function damageCreep(c, dmg, dtype) {
     if (!m.boss) sfx("kill");
     if (!m.boss && rnd() < 0.08) dropItem();
     if (m.splits && !c.child && rnd() < m.splitChance) spawnChild(c, m);
+    if (c.loot) {
+      const l = c.loot;
+      if (l.gold) G.gold += l.gold;
+      if (l.item) G.inv[l.item]++;
+      if (l.charges && G.towers.includes(l.tower))
+        l.tower.charges = Math.min(towerMaxCharges(l.tower), l.tower.charges + l.charges);
+      message("You recover " + lootName(l) + " from the " + creepName(c) + "'s corpse!");
+    }
     if (c.type === "ghost" && G.bones) {
       const got = Object.keys(G.bones.inv).filter(k => G.bones.inv[k] > 0 && k in G.inv);
       for (const k of got) G.inv[k] += G.bones.inv[k];
@@ -1757,6 +1889,8 @@ function updateCreeps(dt) {
     // -- m.regen (currently only the troll) overrides the baseline rate
     if (c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + (trait(c, "regen") || BASE_REGEN) * dt);
     c.hitFlash = Math.max(0, c.hitFlash - dt);
+    if (c.waitUntil && G.time < c.waitUntil) continue;           // praying
+    if (c.goal && c.goal.kind === "flee" && G.time >= c.goal.until) c.goal = null;
     let spd = c.spd;
     if (G.time < c.slowUntil) spd *= c.slowFactor;
     if (auras.length && hastened(c, auras)) spd *= AURA_HASTE;
@@ -1766,7 +1900,11 @@ function updateCreeps(dt) {
     while (c.t >= 1 && !c.dead) {
       c.t -= 1;
       c.x = c.nx; c.y = c.ny;
-      if (c.x === ex && c.y === ey) {
+      if (c.goal) {
+        const g = c.goal, d = Math.abs(c.x - g.x) + Math.abs(c.y - g.y);
+        if (d <= (g.adj ? 1 : 0)) { arriveGoal(c, m); if (c.dead) break; }
+      }
+      if (!c.goal && c.x === ex && c.y === ey) {
         c.dead = true; c.leaked = true;
         // same reasoning as deathFx() -- a leaked creep is filtered out
         // of G.creeps in this very call, so without a marker it would
@@ -1783,6 +1921,8 @@ function updateCreeps(dt) {
         break;
       }
       advanceTarget(c);
+      // a goal walled off mid-wave is abandoned: back to the Amulet
+      if (c.nx === c.x && c.ny === c.y && c.goal) { c.goal = null; advanceTarget(c); }
       if (c.nx === c.x && c.ny === c.y) { c.t = 0; break; } // no route -- wait in place
     }
   }
@@ -1805,7 +1945,7 @@ function updateWalls(dt) {
   if (anyBroken) {
     const broken = G.towers.filter(t => t.broken);
     G.towers = G.towers.filter(t => !t.broken);
-    G.flow = computeFlow();
+    setFlow();
     for (const t of broken) message(pick([
       "The " + TOWERS[t.type].name + " crumbles under the assault!",
       "The " + TOWERS[t.type].name + " is smashed to rubble!",
@@ -1848,7 +1988,7 @@ function updateSiege(dt) {
   if (anyGone) {
     const gone = G.towers.filter(t => t.gone);
     G.towers = G.towers.filter(t => !t.gone);
-    if (gone.some(t => TOWERS[t.type].blocks)) G.flow = computeFlow();
+    if (gone.some(t => TOWERS[t.type].blocks)) setFlow();
     for (const t of gone) {
       const name = TOWERS[t.type].name;
       message(t.goneKind === "siege" ? pick([
@@ -2020,6 +2160,7 @@ function drawGame() {
     });
     if (c) l2 = "You see: " + creepName(c) + "  HP:" +
       Math.ceil(c.hp) + "/" + c.maxHp + (G.time < c.slowUntil ? " (chilled)" : "") +
+      (c.goal && c.goal.kind === "flee" ? " (fleeing)" : "") + (c.loot ? " (laden)" : "") +
       (hastened(c, G.creeps.filter(a => !a.dead && trait(a, "aura"))) ? " (hastened)" : "") +
       "   (click for lore)";
   }
@@ -2058,6 +2199,8 @@ function drawLore() {
   if (m.flies) flags.push("flies");
   if (m.submerges) flags.push("submerges");
   if (m.aura) flags.push("hastes nearby monsters");
+  if (m.motive) flags.push({ steal: "steals", pray: "prays at altars", water: "seeks fountains",
+                             escape: "flees upstairs" }[m.motive]);
   if (m.splits) flags.push("splits");
   if (m.siege) flags.push("smashes towers");
   if (m.disarms) flags.push("disarms traps");
@@ -2140,9 +2283,9 @@ function drawHelp() {
     "ITEMS: r fire  q haste  z cold  c charge  i inv",
     "KEYS: SPACE wave/pause  a auto  g walls  m sound  ^P log  R restart",
     "      hjkl/arrows+ENTER cursor  + - speed",
-    "",
+    "Below lies the Amulet of Yendor.  Hold the stairs, Keeper.",
     "~30 monsters, phasing in/out by dungeon level. Some fly,",
-    "submerge, split, regen fast, smash towers, or disarm",
+    "submerge, split, steal, pray, smash towers, or disarm",
     "traps -- click any monster to read its lore. D is always",
     "the wave-10 boss.",
   ];

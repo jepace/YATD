@@ -149,6 +149,15 @@ a while. Routing monsters past the altar with your maze is the trick.
 
 ## Monsters
 
+Somewhere below lies the Amulet of Yendor, and nearly everything in the
+dungeon is drawn down toward it; that's why they all head for `>`. A few
+want something else. Leprechauns and nymphs rob a tower and run back
+upstairs with the loot (kill them to get it back). Acolytes stop to pray
+at an altar, healing the monsters around them. Eels and krakens detour
+through fountains. A badly hurt monster sometimes turns and flees for a
+while. Your own ghost, if you meet it, starts mid-level and just wants
+out, up the stairs.
+
 Between waves, the bottom line tells you what you hear coming ("You hear
 the howling of wolves", "You smell brimstone"), so you can build for the
 next wave. Before wave 10 it names the dragon's color and what it's

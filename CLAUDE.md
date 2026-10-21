@@ -625,6 +625,33 @@ The `<script>` is organized top-to-bottom in sections (marked with
    (flow distance minus `c.t`) replaces the old "furthest along the
    path" sort key for tower targeting — lower is closer to the exit.
 
+   **Motives (lore: the Amulet of Yendor lies below, and most monsters
+   are drawn down toward it):** `MONSTERS[type].motive` makes
+   `assignMotive()` (in `spawnCreep`, before `advanceTarget`) give the
+   creep a `c.goal = {kind, x, y, adj?}`. `creepFlow()` then routes it on
+   `flowTo(x, y, flies)`, a cached `computeFlow(null, flies, goal)`.
+   `computeFlow`'s third argument is the BFS source and is seeded even
+   when not walkable (a target tower).
+   - `escape` (the bones ghost): spawns mid-level, at least 10 cells from
+     both stairs, and heads up to `<`.
+   - `steal` (leprechaun, nymph): goes to stand beside a random non-wall
+     blocking tower, takes gold, an item or that tower's charges into
+     `c.loot`, then escapes. Killing a looted creep returns the loot.
+   - `pray` (acolyte; its pool entry has `needsAltar`, so it only spawns
+     on altar levels): prays `PRAY_TIME` at the altar, healing nearby
+     monsters, then heads down.
+   - `water` (eel, kraken): detours through a fountain first.
+   - `flee`: any non-boss hit below 25% HP has a one-time `FLEE_CHANCE`
+     to head for `<` for `FLEE_TIME`.
+
+   `updateCreeps` checks goal arrival after every step (`arriveGoal`).
+   A creep with a goal never leaks on `>`, and escaping costs no HP. A goal
+   that becomes unreachable is dropped, and the creep reverts to the
+   Amulet. **Always recompute the ground flow with `setFlow()`, never
+   `G.flow = computeFlow()`**, because `setFlow` also empties
+   `G.flowCache`, which would otherwise route goal creeps through towers
+   that no longer exist (or around ones that do).
+
    **If you touch this system:** any change to `buildable`/`trapPlaceable`
    or to when `G.flow` gets recomputed needs to preserve the invariant
    that `wouldSealPath` is checked before every *blocking* placement —
