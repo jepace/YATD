@@ -1183,6 +1183,7 @@ const creepName = (c) => (c.elite ? "greater " : "") + MONSTERS[c.type].name;
      flee   -- any badly hurt non-boss may turn back toward '<' for a while
    Goal creeps never leak on '>' -- only the Amulet-seekers do -- and an
    escaping creep costs no HP: it's leaving, not going deeper. */
+const LEP_PURSE_DIE = 10;
 const FLEE_CHANCE = 0.3, FLEE_TIME = 3, PRAY_TIME = 2, PRAY_HEAL = 0.3, PRAY_RADIUS = 3;
 function stealTargets() {
   return G.towers.filter(t => TOWERS[t.type].blocks && TOWERS[t.type].kind !== "wall");
@@ -1201,6 +1202,9 @@ function assignMotive(c, m) {
     }
     g = { kind: "escape", x: ENTRANCE[0], y: ENTRANCE[1] };
   } else if (m.motive === "steal") {
+    // NetHack gives every leprechaun d(level_difficulty, 30) gold of its own
+    // (makemon.c); we roll d(Dlvl, LEP_PURSE_DIE), a smaller die to suit this economy
+    if (m.ch === "l") { c.purse = 0; for (let i = 0; i < G.dlvl; i++) c.purse += ri(1, LEP_PURSE_DIE); }
     const ts = stealTargets();
     if (ts.length) { const t = pick(ts); g = { kind: "steal", x: t.x, y: t.y, adj: true }; }
   } else if (m.motive === "pray" && ALTARS.length) {
@@ -1551,7 +1555,12 @@ function damageCreep(c, dmg, dtype) {
       if (l.item) G.inv[l.item]++;
       if (l.charges && G.towers.includes(l.tower))
         l.tower.charges = Math.min(towerMaxCharges(l.tower), l.tower.charges + l.charges);
-      message("You recover " + lootName(l) + " from the " + creepName(c) + "'s corpse!");
+      message("You recover " + lootName(l) + " from the " + creepName(c) + "'s corpse!" +
+              (c.purse ? "  And its own pot of " + c.purse + " zorkmids!" : ""));
+    }
+    if (c.purse) {
+      G.gold += c.purse;
+      if (!c.loot) message("The " + creepName(c) + " drops its pot of " + c.purse + " zorkmids!");
     }
     if (c.type === "ghost" && G.bones) {
       const got = Object.keys(G.bones.inv).filter(k => G.bones.inv[k] > 0 && k in G.inv);

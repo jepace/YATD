@@ -636,7 +636,9 @@ The `<script>` is organized top-to-bottom in sections (marked with
      both stairs, and heads up to `<`.
    - `steal` (leprechaun, nymph): goes to stand beside a random non-wall
      blocking tower, takes gold, an item or that tower's charges into
-     `c.loot`, then escapes. Killing a looted creep returns the loot.
+     `c.loot`, then escapes. Killing a looted creep returns the loot. A leprechaun also spawns with its own `c.purse` of
+     d(Dlvl, `LEP_PURSE_DIE`) gold, dropped on death; NetHack's version is
+     d(level difficulty, 30).
    - `pray` (acolyte; its pool entry has `needsAltar`, so it only spawns
      on altar levels): prays `PRAY_TIME` at the altar, healing nearby
      monsters, then heads down.
